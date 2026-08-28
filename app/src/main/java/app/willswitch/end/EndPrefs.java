@@ -26,14 +26,6 @@ public final class EndPrefs {
     private static final String KEY_ENABLED_APPS = "enabled_apps";
     private static final String KEY_ENABLED_HOSTS = "enabled_hosts";
     private static final String KEY_BROWSER_SITES = "browser_sites_enabled";
-    private static final String KEY_MIRROR_MODE = "mirror_mode";
-
-    /** Not measured yet. Mirror gestures with the motion guard left on. */
-    public static final int MIRROR_UNKNOWN = 0;
-    /** Injected strokes provably reach the app while the guard is on. */
-    public static final int MIRROR_CONFIRMED = 1;
-    /** Injection is swallowed by our own capture. Release the guard instead. */
-    public static final int MIRROR_RELEASE_GUARD = 2;
 
     public static SharedPreferences prefs(Context c) {
         return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -46,16 +38,14 @@ public final class EndPrefs {
         public final Set<String> apps;
         public final Set<String> hosts;
         public final boolean browserSites;
-        public final int mirrorMode;
 
         Snapshot(int screens, int cooldownMinutes, Set<String> apps,
-                 Set<String> hosts, boolean browserSites, int mirrorMode) {
+                 Set<String> hosts, boolean browserSites) {
             this.screens = screens;
             this.cooldownMinutes = cooldownMinutes;
             this.apps = Collections.unmodifiableSet(apps);
             this.hosts = Collections.unmodifiableSet(hosts);
             this.browserSites = browserSites;
-            this.mirrorMode = mirrorMode;
         }
 
         public boolean isProtectedApp(String pkg) {
@@ -74,8 +64,7 @@ public final class EndPrefs {
                 p.getInt(KEY_COOLDOWN, 20),
                 readSet(p, KEY_ENABLED_APPS, Feeds.DEFAULT_APPS),
                 readSet(p, KEY_ENABLED_HOSTS, Feeds.DEFAULT_HOSTS),
-                p.getBoolean(KEY_BROWSER_SITES, true),
-                p.getInt(KEY_MIRROR_MODE, MIRROR_UNKNOWN)
+                p.getBoolean(KEY_BROWSER_SITES, true)
         );
     }
 
@@ -143,14 +132,6 @@ public final class EndPrefs {
 
     public static void setBrowserSitesEnabled(Context c, boolean enabled) {
         prefs(c).edit().putBoolean(KEY_BROWSER_SITES, enabled).apply();
-    }
-
-    public static int mirrorMode(Context c) {
-        return prefs(c).getInt(KEY_MIRROR_MODE, MIRROR_UNKNOWN);
-    }
-
-    public static void setMirrorMode(Context c, int mode) {
-        prefs(c).edit().putInt(KEY_MIRROR_MODE, mode).apply();
     }
 
     // Lock state survives a service restart, so it is the one piece of session
