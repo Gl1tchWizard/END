@@ -1,0 +1,28 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'app.willswitch.end'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'app.willswitch.end'
+        minSdk 28
+        targetSdk 36
+        versionCode 7
+        versionName '0.7-finite-feed'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
