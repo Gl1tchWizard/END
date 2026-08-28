@@ -24,7 +24,7 @@
             android:name=".EndAccessibilityService"
             android:description="@string/accessibility_description"
             android:exported="true"
-            android:label="END — finite feeds"
+            android:label="END, finite feeds"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

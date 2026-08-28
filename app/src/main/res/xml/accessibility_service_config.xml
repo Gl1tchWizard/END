@@ -1,10 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Event types here are only the defaults. EndAccessibilityService narrows or
+  widens them at runtime: window content changes are subscribed to only while
+  a browser is in front, and only when browser feeds are switched on.
+
+  canRetrieveWindowContent is required to read the browser address bar. The
+  service queries exactly one view id per browser and keeps only the host.
+-->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeViewScrolled|typeWindowContentChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:canRetrieveWindowContent="false"
+    android:accessibilityFlags="flagReportViewIds"
+    android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"
     android:isAccessibilityTool="false"
-    android:notificationTimeout="0"
+    android:notificationTimeout="100"
     android:description="@string/accessibility_description"
     android:settingsActivity="app.willswitch.end.MainActivity" />

@@ -50,6 +50,18 @@ public class MainActivity extends Activity {
             new AppSpec("Snapchat", "com.snapchat.android", "Spotlight · Discover (MVP)")
     };
 
+    private static final SiteSpec[] SITES = new SiteSpec[] {
+            new SiteSpec("instagram.com", "feed · Reels · Explore"),
+            new SiteSpec("reddit.com", "home and subreddit feeds"),
+            new SiteSpec("x.com", "home feed"),
+            new SiteSpec("twitter.com", "home feed"),
+            new SiteSpec("tiktok.com", "For You feed"),
+            new SiteSpec("facebook.com", "feed · Reels"),
+            new SiteSpec("youtube.com", "Shorts · home"),
+            new SiteSpec("threads.net", "home feed"),
+            new SiteSpec("linkedin.com", "feed")
+    };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -104,14 +116,19 @@ public class MainActivity extends Activity {
         root.addView(spacer(10));
         for (AppSpec app : APPS) root.addView(appRow(app));
 
-        root.addView(spacer(24));
-        TextView browser = body("Browser websites are not included in this Android MVP. Per-site browser protection belongs in the END extension.");
-        browser.setPadding(dp(2), 0, dp(2), 0);
-        root.addView(browser);
+        root.addView(spacer(30));
+        root.addView(sectionTitle("FEEDS IN THE BROWSER"));
+        root.addView(body("The same limit applies to these sites when you open them in Chrome, Brave, Firefox, Samsung Internet, Edge, Opera, Vivaldi or DuckDuckGo. Each site counts separately, so ending Reddit does not end Instagram."));
+        root.addView(spacer(10));
+        root.addView(browserMasterRow());
+
+        if (EndPrefs.browserSitesEnabled(this)) {
+            for (SiteSpec site : SITES) root.addView(siteRow(site));
+        }
 
         root.addView(spacer(30));
         root.addView(sectionTitle("PRIVACY FIRST"));
-        TextView privacy = body("No account. No analytics. No internet permission. No screen content. After END is reached on Android 14+, touch gestures in that selected app are handled locally only long enough to reject forward swipes and replay allowed gestures. Touch coordinates are not stored.");
+        TextView privacy = body("No account. No analytics. No internet permission. END never reads page content, text, images, messages or passwords.\n\nTo know which site you are on, END reads one thing in the browsers listed above: the address bar. It keeps only the host, never the path or the query, and it checks at most about once per second. Turn the switch above off and END never reads it at all.\n\nAfter END is reached on Android 14+, touch gestures in that feed are handled locally only long enough to reject forward swipes and pass the rest through. Touch coordinates are not stored.");
         privacy.setTextColor(Color.rgb(160,160,160));
         root.addView(privacy);
 
@@ -124,7 +141,7 @@ public class MainActivity extends Activity {
         brand.setImageResource(R.drawable.end_brand_mockup);
         brand.setAdjustViewBounds(true);
         brand.setScaleType(ImageView.ScaleType.FIT_START);
-        brand.setContentDescription("END — life's not infinite — by WillSwitch");
+        brand.setContentDescription("END, life is not infinite, by WillSwitch");
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         brand.setLayoutParams(lp);
@@ -171,7 +188,28 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
         bLp.topMargin = dp(14);
         card.addView(enableButton, bLp);
+
+        TextView mirror = new TextView(this);
+        mirror.setTextColor(MUTED);
+        mirror.setTextSize(11);
+        mirror.setLineSpacing(0, 1.1f);
+        mirror.setText(mirrorModeCopy());
+        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mLp.topMargin = dp(12);
+        card.addView(mirror, mLp);
         return card;
+    }
+
+    private String mirrorModeCopy() {
+        switch (EndPrefs.mirrorMode(this)) {
+            case EndPrefs.MIRROR_CONFIRMED:
+                return "Input mirroring verified on this device.";
+            case EndPrefs.MIRROR_RELEASE_GUARD:
+                return "This device does not accept mirrored gestures. END falls back to releasing the wall for the rest of an allowed swipe, which can cost one swipe.";
+            default:
+                return "Input mirroring not measured yet. It is checked the first time you hit END.";
+        }
     }
 
     private View choiceRow(int[] values, int selected, IntChoice listener, String suffix) {
@@ -219,6 +257,74 @@ public class MainActivity extends Activity {
         toggle.setChecked(EndPrefs.isProtected(this, app.pkg));
         toggle.setButtonTintList(null);
         toggle.setOnCheckedChangeListener((buttonView, isChecked) -> EndPrefs.setProtected(this, app.pkg, isChecked));
+        row.addView(toggle);
+        return row;
+    }
+
+    private View browserMasterRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(14), dp(12), dp(14), dp(12));
+        row.setBackgroundColor(PANEL);
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+
+        TextView name = new TextView(this);
+        name.setText("Limit feeds in browsers");
+        name.setTextColor(TEXT);
+        name.setTextSize(15);
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        copy.addView(name);
+
+        TextView hint = new TextView(this);
+        hint.setText("Lets END read the address bar to see which site you are on");
+        hint.setTextColor(MUTED);
+        hint.setTextSize(11);
+        hint.setLineSpacing(0, 1.08f);
+        copy.addView(hint);
+
+        row.addView(copy, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        Switch toggle = new Switch(this);
+        toggle.setChecked(EndPrefs.browserSitesEnabled(this));
+        toggle.setOnCheckedChangeListener((button, checked) -> {
+            EndPrefs.setBrowserSitesEnabled(this, checked);
+            render();
+        });
+        row.addView(toggle);
+        return row;
+    }
+
+    private View siteRow(SiteSpec site) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(9), 0, dp(9));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+
+        TextView name = new TextView(this);
+        name.setText(site.host);
+        name.setTextColor(TEXT);
+        name.setTextSize(15);
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        copy.addView(name);
+
+        TextView hint = new TextView(this);
+        hint.setText(site.hint);
+        hint.setTextColor(MUTED);
+        hint.setTextSize(11);
+        copy.addView(hint);
+
+        row.addView(copy, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        Switch toggle = new Switch(this);
+        toggle.setChecked(EndPrefs.isHostEnabled(this, site.host));
+        toggle.setOnCheckedChangeListener(
+                (button, checked) -> EndPrefs.setHostEnabled(this, site.host, checked));
         row.addView(toggle);
         return row;
     }
@@ -273,7 +379,7 @@ public class MainActivity extends Activity {
         box.setPadding(dp(24), dp(8), dp(24), 0);
 
         TextView copy = new TextView(this);
-        copy.setText("END uses Android Accessibility to detect feed activity and the name of the app currently on screen. It uses those events only to count scrolling in apps you choose.\n\nOn Android 14 and newer, once your limit is reached END temporarily handles touchscreen gestures while that selected app is foregrounded: an upward finger swipe that would request new feed content is discarded; taps, horizontal gestures and downward/back scrolling are replayed to the app. This is what creates a finite feed instead of locking the whole app.\n\nEND does not retrieve, read, save or transmit screen content, text, images, messages or passwords. Touch coordinates used after the limit are not stored. END has no Internet permission. Selected apps, scroll progress and lock timers stay on this device.\n\nYou can disable END at any time in Android Accessibility settings.");
+        copy.setText("END uses Android Accessibility to detect feed activity and the name of the app currently on screen. It uses those events only to count scrolling in the apps and sites you choose.\n\nIf you switch on browser feeds, END also reads the address bar of the browsers it supports, so it can tell reddit.com from instagram.com. It keeps only the host, never the path or the query, and it never reads the page itself.\n\nOn Android 14 and newer, once your limit is reached END handles touchscreen gestures while that feed is on screen: an upward finger swipe that would request new content is discarded, and taps, horizontal gestures and downward scrolling are passed straight through. This is what creates a finite feed instead of locking the whole app.\n\nEND does not retrieve, save or transmit screen content, text, images, messages or passwords. Touch coordinates used after the limit are not stored. END has no Internet permission. Everything stays on this device.\n\nYou can disable END at any time in Android Accessibility settings.");
         copy.setTextColor(Color.rgb(45,45,45));
         copy.setTextSize(14);
         copy.setLineSpacing(0,1.16f);
@@ -303,6 +409,13 @@ public class MainActivity extends Activity {
         final String name, pkg, hint;
         AppSpec(String name, String pkg, String hint) {
             this.name = name; this.pkg = pkg; this.hint = hint;
+        }
+    }
+
+    private static class SiteSpec {
+        final String host, hint;
+        SiteSpec(String host, String hint) {
+            this.host = host; this.hint = hint;
         }
     }
 }
