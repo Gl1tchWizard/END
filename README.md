@@ -1,144 +1,98 @@
-# END Android v0.8, finite feed
+# END Android v0.9, finite feed
 
 **END, life is not infinite**
 by WillSwitch
 
-Roughly half the waking population now scrolls a feed that is designed never to
-run out. END puts a bottom on it. You choose how much feed exists, and when
-that is used up the feed stops producing new content while the app stays
-usable.
-
-v0.8 keeps the behaviour v0.7 aimed at and rebuilds the machinery underneath
-it, because the v0.7 implementation made scrolling feel heavy.
+Roughly half the waking population scrolls a feed that is designed never to run
+out. END puts a bottom on it. You choose how much feed exists, and once that is
+used up the stream ends: a banner marks the bottom, and pushing further brings
+you back to it.
 
 ## Behaviour
 
 Before the limit:
-- END counts feed progress from scroll events. Default limit is 3 screens.
-- Default reset is 20 minutes of not touching that feed.
-- Nothing is intercepted. Input is untouched.
+- END counts feed progress. Default limit is 3 screens.
+- Default reset is 20 minutes without touching that feed.
+- Nothing is intercepted.
 
 At the limit:
-- the current feed stays on screen and the app stays usable;
-- a small non-touchable END badge appears with a countdown;
-- on Android 14+ END arms the finite-feed input guard.
-
-After the limit on Android 14+:
-- finger swipe up, which asks for new content, is dropped;
-- finger swipe down, which returns to earlier content, passes through;
-- taps, long presses and drags pass through;
-- horizontal swipes pass through;
-- Android back, home, recents and the notification shade keep working.
+- a banner across the bottom of the stream says you have reached the end, with
+  a countdown to the next feed;
+- scrolling back, tapping, playing, navigating and leaving the app all keep
+  working exactly as before;
+- driving the feed past the end brings it back to the end, the way a list
+  behaves when it runs out.
 
 Feeds are tracked separately. Ending Reddit does not end Instagram, and ending
-reddit.com in Chrome does not end the Reddit app.
+reddit.com in Brave does not end the Reddit app.
+
+## Why the wall changed in v0.9
+
+v0.8 armed `setMotionEventSources` at the limit and injected every allowed
+gesture back with `dispatchGesture`. Android offers no way to pass a captured
+touch event through selectively, so every tap and every backward swipe had to
+be re-created. On devices where an injected stroke does not reach the app while
+the same service is capturing the touchscreen, nothing reaches the app at all
+and it freezes. That is what happened in Brave: Reddit stopped, and so did
+scrolling back.
+
+v0.9 never touches input. The feed position where the limit was reached is
+pinned, and when a scroll event shows the feed has gone past it, END sends
+`ACTION_SCROLL_BACKWARD` to the scrollable node that moved. Touch handling
+stays entirely with the app.
+
+Three consequences:
+- nothing can freeze, because nothing is intercepted;
+- scrolling back is native, so it is smooth;
+- the wall works on Android 9 and up instead of Android 14 and up.
+
+The trade-off is honest: pushing past the end is a bounce, not a hard stop. You
+see a moment of movement before the feed returns. That is how the bottom of a
+list already behaves on Android.
+
+## Counting
+
+`TYPE_VIEW_SCROLLED` is the primary signal, with an item-based or pixel-based
+profile per feed and a cap of 1.5 screens per 250 ms so one fling cannot
+exhaust the limit.
+
+Some apps, YouTube among them, never emit scroll events for their feed. For
+those only, a dense burst of content changes counts as one screen. That
+fallback switches itself off permanently for any feed that has ever produced a
+real scroll event, so it cannot double count on Reddit or Instagram.
 
 ## Browsers
 
 END recognises feed sites inside Chrome, Chrome Beta, Brave, Firefox, Fenix,
-Samsung Internet, Edge, Opera, Vivaldi and DuckDuckGo. The same limit and the
-same wall apply to instagram.com, reddit.com, x.com, twitter.com, tiktok.com,
-facebook.com, youtube.com, threads.net and linkedin.com.
+Samsung Internet, Edge, Opera, Vivaldi and DuckDuckGo, for instagram.com,
+reddit.com, x.com, twitter.com, tiktok.com, facebook.com, youtube.com,
+threads.net and linkedin.com.
 
-To know which site is on screen, END reads one node: the browser address bar,
-by view id, at most about once per second, and keeps only the host. The page
-itself is never queried. This is switchable in the app, and with the switch off
-END never reads it.
+To know which site is on screen, END reads one node: the address bar, by view
+id, at most about once per second, keeping only the host. The page is never
+read. Switchable in the app, and with the switch off END never reads it.
 
-## What changed since v0.7
+## Test
 
-**Nothing on the hot path touches disk.** v0.7 called into SharedPreferences
-from `onMotionEvent`, which meant a disk read and a fresh `HashSet` allocation
-for every `ACTION_MOVE`, plus a read-modify-write per accessibility event for
-debug counters, on top of `typeAllMask` with a zero notification timeout.
-Settings now live in a cached snapshot rebuilt only on change, feed progress
-lives in memory, and only the lock transition is written.
+1. Run from Android Studio, then switch the service on under
+   Settings, Accessibility, END. Android disables it on every reinstall.
+2. Set LIMIT to 1.
+3. YouTube Shorts: swipe to one new Short. The banner should appear. Swipe up
+   again, you should come back to the same Short. Swipe down, the previous
+   Short should return smoothly. Tap a control, it should respond.
+4. reddit.com in Brave: same, and check that the banner names the site.
 
-**Allowed gestures are mirrored live.** v0.7 buffered the whole gesture, waited
-for `ACTION_UP` and then dispatched a single straight line from the down point
-to the up point with a clamped duration. Every intermediate point and all
-velocity were lost, so an allowed swipe arrived after the finger had already
-left the glass. `GestureMirror` now opens a continued stroke as soon as the
-gesture is classified and keeps appending real segments to it.
-
-**The guard is armed on transitions only.** v0.7 called `setServiceInfo` twice
-per allowed gesture, once to release capture before injecting and once to
-restore it 45 ms later. That is a binder round trip into the system
-accessibility service, and the gap between the two let real forward swipes
-through. The guard now changes state on foreground and lock transitions only,
-and the call is skipped when nothing changed.
-
-**No gesture is dropped.** v0.7 returned early from `onMotionEvent` for the
-whole duration of a dispatch, so any touch during a replay vanished.
-
-**System gestures use global actions.** An injected stroke from the screen edge
-does not trigger Android navigation, so v0.7 replayed edge swipes as ordinary
-gestures and navigation felt broken. Edge gestures now map to
-`GLOBAL_ACTION_BACK`, `HOME`, `RECENTS` and `NOTIFICATIONS`.
-
-**The notification shade is released.** v0.7 ignored System UI window changes,
-so the guard stayed armed on the feed app while the shade was open and swipes
-in the shade were captured.
-
-**One counting model.** v0.7 combined scroll deltas, item indices, content
-change bursts and gesture duration, all of which could fire for the same swipe,
-and one fallback path counted a full screen per burst. Counting now listens to
-`TYPE_VIEW_SCROLLED` only, uses a per-app profile of item based or pixel based,
-and caps accumulation at 1.5 screens per 250 ms.
-
-**The badge is a small window.** v0.7 used a full screen overlay for a pill.
-
-## Input mirroring probe
-
-Android gives an accessibility service an all or nothing capture: once
-`setMotionEventSources` is on, a captured event cannot be selectively passed
-through, so allowed gestures have to be injected back. Whether an injected
-stroke reaches the app while the same service is capturing the touchscreen is
-device dependent and not documented.
-
-END measures it. The first time you hit the wall, it starts a mirrored stroke
-and checks whether the app reacts within 800 ms. After three failures it
-switches to release-guard mode, where the wall is dropped for the rest of an
-allowed swipe instead. The result is shown in the app under END SERVICE and
-logged as:
-
-    MIRROR confirmed: injected strokes reach the app
-    MIRROR switching to release-guard mode
-
-Check this first on a new device.
-
-## Test on the Samsung
-
-1. Open the project in Android Studio and let Gradle sync.
-2. Select the connected Samsung and press Run.
-3. If the old service process is still alive, toggle
-   Settings, Accessibility, END, off, then on.
-4. Set LIMIT to 1 for the first test.
-5. Open YouTube Shorts and swipe to one new Short. END should be reached.
-6. Then check:
-   - swipe up again, the feed should not advance;
-   - swipe down, the previous Short should return, smoothly;
-   - tap a control, it should respond;
-   - swipe from the left edge, back should work;
-   - pull down the notification shade, it should behave normally.
-7. Open reddit.com in Chrome and repeat.
-
-Filter Logcat on `tag:ENDDBG`. Useful lines:
+Filter Logcat on `tag:ENDDBG`:
 
     SERVICE CONNECTED
-    SERVICE INFO events=... guard=true
-    PROGRESS key=...
+    FEED key=...
+    PROGRESS key=... => 2.0 / 3
     END REACHED key=...
-    FINITE WALL blocked forward swipe
-    MIRROR confirmed / MIRROR probe failed
+    WALL pushed back key=... ok=true
+    WALL no scrollable node key=...
 
-## Older Android
-
-The API 34 mechanism, `AccessibilityService.onMotionEvent` with
-`AccessibilityServiceInfo.setMotionEventSources`, is what makes an exact wall
-possible. On Android 13 and older END counts feed progress and shows the badge,
-and the wall arrives with the version that adds a per-app scroll-node
-alternative.
+`WALL no scrollable node` means the app hides its list from the accessibility
+tree and needs a per-app rule.
 
 ## Distribution
 
