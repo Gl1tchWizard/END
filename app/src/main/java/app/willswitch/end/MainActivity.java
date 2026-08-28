@@ -112,13 +112,13 @@ public class MainActivity extends Activity {
 
         root.addView(spacer(30));
         root.addView(sectionTitle("MAKE THESE FINITE"));
-        root.addView(body("END counts feed progress in apps you select. On Android 14+, after the limit it blocks only forward feed swipes; taps, horizontal gestures and scrolling back remain usable."));
+        root.addView(body("END counts feed progress in the apps you select. Past the limit the feed stops producing new content and a banner marks the end of the stream. Scrolling back, tapping and navigation keep working normally."));
         root.addView(spacer(10));
         for (AppSpec app : APPS) root.addView(appRow(app));
 
         root.addView(spacer(30));
         root.addView(sectionTitle("FEEDS IN THE BROWSER"));
-        root.addView(body("The same limit applies to these sites when you open them in Chrome, Brave, Firefox, Samsung Internet, Edge, Opera, Vivaldi or DuckDuckGo. Each site counts separately, so ending Reddit does not end Instagram."));
+        root.addView(body("The same limit applies to these sites in Chrome, Brave, Firefox, Samsung Internet, Edge, Opera, Vivaldi and DuckDuckGo. Each site counts separately, so ending Reddit does not end Instagram."));
         root.addView(spacer(10));
         root.addView(browserMasterRow());
 
@@ -128,7 +128,7 @@ public class MainActivity extends Activity {
 
         root.addView(spacer(30));
         root.addView(sectionTitle("PRIVACY FIRST"));
-        TextView privacy = body("No account. No analytics. No internet permission. END never reads page content, text, images, messages or passwords.\n\nTo know which site you are on, END reads one thing in the browsers listed above: the address bar. It keeps only the host, never the path or the query, and it checks at most about once per second. Turn the switch above off and END never reads it at all.\n\nAfter END is reached on Android 14+, touch gestures in that feed are handled locally only long enough to reject forward swipes and pass the rest through. Touch coordinates are not stored.");
+        TextView privacy = body("No account. No analytics. No internet permission. END never reads page content, text, images, messages or passwords, and it never intercepts your touches.\n\nTo know which site you are on, END reads one thing in the browsers listed above: the address bar. It keeps only the host, never the path or the query, and it checks at most about once per second. Turn the switch above off and END never reads it at all.");
         privacy.setTextColor(Color.rgb(160,160,160));
         root.addView(privacy);
 
@@ -138,7 +138,7 @@ public class MainActivity extends Activity {
 
     private View brand() {
         ImageView brand = new ImageView(this);
-        brand.setImageResource(R.drawable.end_brand_mockup);
+        brand.setImageResource(R.drawable.end_brand);
         brand.setAdjustViewBounds(true);
         brand.setScaleType(ImageView.ScaleType.FIT_START);
         brand.setContentDescription("END, life is not infinite, by WillSwitch");
@@ -189,27 +189,7 @@ public class MainActivity extends Activity {
         bLp.topMargin = dp(14);
         card.addView(enableButton, bLp);
 
-        TextView mirror = new TextView(this);
-        mirror.setTextColor(MUTED);
-        mirror.setTextSize(11);
-        mirror.setLineSpacing(0, 1.1f);
-        mirror.setText(mirrorModeCopy());
-        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        mLp.topMargin = dp(12);
-        card.addView(mirror, mLp);
         return card;
-    }
-
-    private String mirrorModeCopy() {
-        switch (EndPrefs.mirrorMode(this)) {
-            case EndPrefs.MIRROR_CONFIRMED:
-                return "Input mirroring verified on this device.";
-            case EndPrefs.MIRROR_RELEASE_GUARD:
-                return "This device does not accept mirrored gestures. END falls back to releasing the wall for the rest of an allowed swipe, which can cost one swipe.";
-            default:
-                return "Input mirroring not measured yet. It is checked the first time you hit END.";
-        }
     }
 
     private View choiceRow(int[] values, int selected, IntChoice listener, String suffix) {
@@ -379,7 +359,7 @@ public class MainActivity extends Activity {
         box.setPadding(dp(24), dp(8), dp(24), 0);
 
         TextView copy = new TextView(this);
-        copy.setText("END uses Android Accessibility to detect feed activity and the name of the app currently on screen. It uses those events only to count scrolling in the apps and sites you choose.\n\nIf you switch on browser feeds, END also reads the address bar of the browsers it supports, so it can tell reddit.com from instagram.com. It keeps only the host, never the path or the query, and it never reads the page itself.\n\nOn Android 14 and newer, once your limit is reached END handles touchscreen gestures while that feed is on screen: an upward finger swipe that would request new content is discarded, and taps, horizontal gestures and downward scrolling are passed straight through. This is what creates a finite feed instead of locking the whole app.\n\nEND does not retrieve, save or transmit screen content, text, images, messages or passwords. Touch coordinates used after the limit are not stored. END has no Internet permission. Everything stays on this device.\n\nYou can disable END at any time in Android Accessibility settings.");
+        copy.setText("END uses Android Accessibility to detect feed activity and the name of the app currently on screen. It uses those events only to count scrolling in the apps and sites you choose.\n\nIf you switch on browser feeds, END also reads the address bar of the browsers it supports, so it can tell reddit.com from instagram.com. It keeps only the host, never the path or the query, and it never reads the page itself.\n\nOnce your limit is reached, END holds the feed at the point where it ended: if the feed is pushed further, END scrolls it back, the way a list behaves when it runs out. Your touches are never intercepted, so scrolling back, tapping and navigation keep working.\n\nEND does not retrieve, save or transmit screen content, text, images, messages or passwords. END has no Internet permission. Everything stays on this device.\n\nYou can disable END at any time in Android Accessibility settings.");
         copy.setTextColor(Color.rgb(45,45,45));
         copy.setTextSize(14);
         copy.setLineSpacing(0,1.16f);
