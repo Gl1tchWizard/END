@@ -4,7 +4,9 @@
   address bar, and finding the scrollable node to push the feed back with when
   it is driven past the end. END never reads page text or content.
 
-  canPerformGestures is no longer required: nothing is injected.
+  notificationTimeout is 0 on purpose: a burst of content changes is how END
+  counts feeds that never report scrolling, and a timeout would coalesce it
+  into nothing. The handler is cheap, so the flood costs little.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged|typeViewScrolled|typeWindowContentChanged"
@@ -12,6 +14,6 @@
     android:accessibilityFlags="flagReportViewIds"
     android:canRetrieveWindowContent="true"
     android:isAccessibilityTool="false"
-    android:notificationTimeout="100"
+    android:notificationTimeout="0"
     android:description="@string/accessibility_description"
     android:settingsActivity="app.willswitch.end.MainActivity" />

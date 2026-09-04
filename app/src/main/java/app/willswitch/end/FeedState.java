@@ -5,9 +5,17 @@ import android.view.accessibility.AccessibilityEvent;
 /**
  * In-memory state for one feed. A feed is an app, or a site inside a browser.
  *
- * Two jobs: count how much feed has been consumed before the limit, and
- * remember where the wall sits afterwards so the service can tell a scroll
- * back from a push past the end.
+ * Counts how much feed has been consumed. Two signals, never both for the
+ * same movement:
+ *
+ * 1. TYPE_VIEW_SCROLLED, with an item-based or pixel-based profile. This is
+ *    exact for Reddit, Instagram, X and web pages.
+ * 2. A dense burst of content changes, for feeds that never report scrolling.
+ *    YouTube Shorts is the main one. This signal is silenced for a while after
+ *    every real scroll event, so it cannot double count on feeds that have both.
+ *
+ * Both signals only count when the user touched the screen just before, which
+ * keeps autoplay, refresh and progress bars from filling the limit.
  */
 final class FeedState {
     private static final int NO_VALUE = Integer.MIN_VALUE;
@@ -20,16 +28,11 @@ final class FeedState {
     private static final float BLIND_STEP = 0.5f;
     private static final long BLIND_MIN_GAP_MS = 400L;
 
-    /**
-     * Some apps, YouTube among them, never emit TYPE_VIEW_SCROLLED for their
-     * feed. For those only, a dense burst of content changes counts as one
-     * screen. It stays switched off for any feed that has ever produced a real
-     * scroll event, so it cannot double count on Reddit or Instagram.
-     */
-    private static final int BURST_EVENTS = 5;
+    private static final int BURST_EVENTS = 6;
     private static final long BURST_SPAN_MS = 360L;
     private static final long BURST_MIN_GAP_MS = 900L;
-    private static final long BURST_SETTLE_MS = 1500L;
+    private static final long BURST_AFTER_SCROLL_MS = 1500L;
+    private static final long BURST_AFTER_ENTER_MS = 1200L;
 
     final String key;
     final int profile;
@@ -38,13 +41,6 @@ final class FeedState {
     long lockedUntil;
     long lastActivityAt;
 
-    /** True once this feed has produced a real scroll event. */
-    boolean sawScrollEvent;
-
-    /** Feed position when the limit was reached. */
-    private int wallIndex = NO_VALUE;
-    private int wallScrollY = NO_VALUE;
-
     private int lastItemIndex = NO_VALUE;
     private int lastScrollY = NO_VALUE;
     private long lastBlindStepAt;
@@ -52,6 +48,7 @@ final class FeedState {
     private float windowTotal;
 
     private long enteredAt;
+    private long lastScrollAt;
     private long burstStartAt;
     private int burstCount;
     private long lastBurstCountAt;
@@ -75,8 +72,6 @@ final class FeedState {
         progress = 0f;
         lastItemIndex = NO_VALUE;
         lastScrollY = NO_VALUE;
-        wallIndex = NO_VALUE;
-        wallScrollY = NO_VALUE;
         lastBlindStepAt = 0L;
         windowStartAt = 0L;
         windowTotal = 0f;
@@ -89,46 +84,16 @@ final class FeedState {
         reset();
     }
 
-    /** Pin the wall to wherever the feed stands right now. */
-    void markWall() {
-        wallIndex = lastItemIndex;
-        wallScrollY = lastScrollY;
-    }
-
-    /**
-     * True when this scroll event has taken the feed past the wall. Scrolling
-     * back and moving around above the wall return false, so the feed behaves
-     * like an ordinary list that has run out.
-     */
-    boolean pastWall(AccessibilityEvent event) {
-        int from = event.getFromIndex();
-        if (wallIndex != NO_VALUE && from >= 0) return from > wallIndex;
-
-        int scrollY = event.getScrollY();
-        if (wallScrollY != NO_VALUE && scrollY >= 0) {
-            return scrollY > wallScrollY + 40;
-        }
-
-        // No usable position from this app: treat any forward movement as a
-        // push past the end.
-        int dy = event.getScrollDeltaY();
-        if (dy > 0) return true;
-        return dy == 0;
-    }
-
-    /**
-     * How much of a screen this scroll event moved the feed forward.
-     * Backward scrolling returns 0: END counts consumption, not movement.
-     */
+    /** Screens consumed by this scroll event. Backward movement counts 0. */
     float measureScroll(AccessibilityEvent event, int screenHeight, long now) {
-        sawScrollEvent = true;
+        lastScrollAt = now;
         return clampToWindow(rawContribution(event, screenHeight), now);
     }
 
     /** Fallback for feeds that never report scrolling. */
     float measureContentBurst(long now) {
-        if (sawScrollEvent) return 0f;
-        if (now - enteredAt < 1200L) return 0f;
+        if (now - lastScrollAt < BURST_AFTER_SCROLL_MS) return 0f;
+        if (now - enteredAt < BURST_AFTER_ENTER_MS) return 0f;
         if (now - lastBurstCountAt < BURST_MIN_GAP_MS) return 0f;
 
         if (burstStartAt == 0L || now - burstStartAt > BURST_SPAN_MS) {
@@ -144,29 +109,6 @@ final class FeedState {
         burstCount = 0;
         lastBurstCountAt = now;
         return clampToWindow(1.0f, now);
-    }
-
-    /**
-     * True when a content burst suggests the feed advanced while the wall is
-     * up. Used only for feeds that never report scrolling.
-     */
-    boolean burstSuggestsAdvance(long now) {
-        if (sawScrollEvent) return false;
-        if (now - lastBurstCountAt < BURST_SETTLE_MS) return false;
-
-        if (burstStartAt == 0L || now - burstStartAt > BURST_SPAN_MS) {
-            burstStartAt = now;
-            burstCount = 1;
-            return false;
-        }
-
-        burstCount++;
-        if (burstCount < BURST_EVENTS) return false;
-
-        burstStartAt = 0L;
-        burstCount = 0;
-        lastBurstCountAt = now;
-        return true;
     }
 
     private float clampToWindow(float raw, long now) {
