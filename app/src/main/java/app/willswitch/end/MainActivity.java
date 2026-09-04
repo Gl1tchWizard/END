@@ -112,7 +112,7 @@ public class MainActivity extends Activity {
 
         root.addView(spacer(30));
         root.addView(sectionTitle("MAKE THESE FINITE"));
-        root.addView(body("END counts feed progress in the apps you select. Past the limit the feed stops producing new content and a banner marks the end of the stream. Scrolling back, tapping and navigation keep working normally."));
+        root.addView(body("END counts how much feed you scroll in the apps you select. When the limit is reached, the page stops: the END wall covers the feed until the countdown runs out. Tap the wall to leave. Everything else on your phone works as usual."));
         root.addView(spacer(10));
         for (AppSpec app : APPS) root.addView(appRow(app));
 
@@ -128,7 +128,7 @@ public class MainActivity extends Activity {
 
         root.addView(spacer(30));
         root.addView(sectionTitle("PRIVACY FIRST"));
-        TextView privacy = body("No account. No analytics. No internet permission. END never reads page content, text, images, messages or passwords, and it never intercepts your touches.\n\nTo know which site you are on, END reads one thing in the browsers listed above: the address bar. It keeps only the host, never the path or the query, and it checks at most about once per second. Turn the switch above off and END never reads it at all.");
+        TextView privacy = body("No account. No analytics. No internet permission. END never reads page content, text, images, messages or passwords.\n\nEND notices that you touched the screen, never where: Android reports a touch outside a one pixel window without coordinates. That is what keeps autoplay and refreshes from counting as scrolling.\n\nTo know which site you are on, END reads one thing in the browsers listed above: the address bar. It keeps only the host, never the path or the query, and it checks at most about once per second. Turn the switch above off and END never reads it at all.");
         privacy.setTextColor(Color.rgb(160,160,160));
         root.addView(privacy);
 
@@ -359,7 +359,7 @@ public class MainActivity extends Activity {
         box.setPadding(dp(24), dp(8), dp(24), 0);
 
         TextView copy = new TextView(this);
-        copy.setText("END uses Android Accessibility to detect feed activity and the name of the app currently on screen. It uses those events only to count scrolling in the apps and sites you choose.\n\nIf you switch on browser feeds, END also reads the address bar of the browsers it supports, so it can tell reddit.com from instagram.com. It keeps only the host, never the path or the query, and it never reads the page itself.\n\nOnce your limit is reached, END holds the feed at the point where it ended: if the feed is pushed further, END scrolls it back, the way a list behaves when it runs out. Your touches are never intercepted, so scrolling back, tapping and navigation keep working.\n\nEND does not retrieve, save or transmit screen content, text, images, messages or passwords. END has no Internet permission. Everything stays on this device.\n\nYou can disable END at any time in Android Accessibility settings.");
+        copy.setText("END uses Android Accessibility to detect feed activity and the name of the app currently on screen. It uses those events only to count scrolling in the apps and sites you choose. To tell scrolling from autoplay, END is notified that you touched the screen, without coordinates.\n\nIf you switch on browser feeds, END also reads the address bar of the browsers it supports, so it can tell reddit.com from instagram.com. It keeps only the host, never the path or the query, and it never reads the page itself.\n\nOnce your limit is reached, END places its wall over that feed until the countdown runs out. Tap the wall to leave. Other apps, notifications and navigation are untouched.\n\nEND does not retrieve, save or transmit screen content, text, images, messages or passwords. END has no Internet permission. Everything stays on this device.\n\nYou can disable END at any time in Android Accessibility settings.");
         copy.setTextColor(Color.rgb(45,45,45));
         copy.setTextSize(14);
         copy.setLineSpacing(0,1.16f);

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">END</string>
-    <string name="accessibility_description">Makes selected infinite feeds finite. Counts feed movement in the apps and sites you choose, and once the limit is reached holds the feed at the end of the stream instead of letting it produce more.</string>
+    <string name="accessibility_description">Makes infinite feeds finite. Counts how much feed you scroll in the apps and sites you choose, and when the limit is reached the page stops until the countdown runs out.</string>
 </resources>
