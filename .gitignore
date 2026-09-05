@@ -5,3 +5,6 @@ local.properties
 /build/
 **/build/
 .DS_Store
+keystore.properties
+*.jks
+*.keystore
