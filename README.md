@@ -106,8 +106,11 @@ Register in the Android Developer Console regardless of channel: from
 30 September 2026 certified devices block normal installs of apps from
 unverified developers, sideloaded ones included.
 
-The workflow in `.github/workflows` builds a debug APK on every push and, on a
-tag `v*`, attaches it to a GitHub Release, which Obtainium tracks directly.
+The workflow in `.github/workflows` builds a debug APK on every push. On a tag
+`v*` it builds a signed release APK, verifies the signature and attaches it to
+a GitHub Release, which Obtainium tracks directly. That job needs four
+repository secrets: `END_KEYSTORE_BASE64` (the keystore, `base64 -w0`),
+`END_KEYSTORE_PASSWORD`, `END_KEY_ALIAS` and `END_KEY_PASSWORD`.
 
 ## Licence
 
