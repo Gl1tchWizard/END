@@ -2,6 +2,33 @@ plugins {
     id 'com.android.application'
 }
 
+// Release signing.
+//
+// The same key signs the Play build and the GitHub build, so people can move
+// between the two channels without uninstalling. Never let Play generate the
+// app signing key: generate it here, upload it to Play App Signing, and keep
+// the only copy offline.
+//
+//   keytool -genkeypair -v -keystore end-release.jks -alias end \
+//           -keyalg RSA -keysize 4096 -validity 10000
+//
+// Local builds read app/keystore.properties, which git ignores:
+//   storeFile=/absolute/path/to/end-release.jks
+//   storePassword=...
+//   keyAlias=end
+//   keyPassword=...
+//
+// CI reads the same values from environment variables. When neither is
+// present, assembleRelease still runs and produces an unsigned APK.
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('app/keystore.properties')
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+def storePath = keystoreProperties['storeFile'] ?: System.getenv('END_KEYSTORE')
+def hasSigningKey = storePath != null && file(storePath).exists()
+
 android {
     namespace 'app.willswitch.end'
     compileSdk 36
@@ -14,10 +41,24 @@ android {
         versionName '1.0'
     }
 
+    if (hasSigningKey) {
+        signingConfigs {
+            release {
+                storeFile file(storePath)
+                storePassword keystoreProperties['storePassword'] ?: System.getenv('END_KEYSTORE_PASSWORD')
+                keyAlias keystoreProperties['keyAlias'] ?: System.getenv('END_KEY_ALIAS')
+                keyPassword keystoreProperties['keyPassword'] ?: System.getenv('END_KEY_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasSigningKey) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
