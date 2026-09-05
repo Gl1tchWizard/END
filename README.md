@@ -88,10 +88,28 @@ neither scroll events nor content bursts and needs a per-app rule. Say which.
 
 ## Distribution
 
-Google Play restricts the accessibility APIs to services that exist for
-accessibility. END declares `isAccessibilityTool="false"` because that is the
-truth, which makes a Play listing unlikely to survive review.
+Two channels, one key. Google Play for reach, GitHub Releases for anyone who
+would rather not use it. Play permits the AccessibilityService API outside
+accessibility tools as long as the app declares `isAccessibilityTool="false"`,
+completes the permission declaration and shows a prominent in-app disclosure,
+all of which END does. It performs no gestures and executes nothing on the
+user's behalf, which is what the October 2025 policy update turns on.
 
-The realistic channels are GitHub Releases and Obtainium, then F-Droid. The
-workflow in `.github/workflows` builds a debug APK on every push, and on a
-tag `v*` attaches the APK to a GitHub Release, which Obtainium tracks directly.
+Generate the release key yourself and upload it to Play App Signing, so both
+channels carry the same signature and people can switch without uninstalling.
+See the comment at the top of `app/build.gradle`.
+
+`docs/play-submission.md` holds every Console answer, the declaration text and
+the reviewer note. `docs/privacy.md` is the privacy policy the listing links to.
+
+Register in the Android Developer Console regardless of channel: from
+30 September 2026 certified devices block normal installs of apps from
+unverified developers, sideloaded ones included.
+
+The workflow in `.github/workflows` builds a debug APK on every push and, on a
+tag `v*`, attaches it to a GitHub Release, which Obtainium tracks directly.
+
+## Licence
+
+GPLv3. See `LICENSE`. Free to use, study, change and share; a closed fork with
+tracking in it is not permitted.
