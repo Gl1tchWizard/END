@@ -1,0 +1,1 @@
+Make feeds finite. After the amount of feed you choose, the page stops.

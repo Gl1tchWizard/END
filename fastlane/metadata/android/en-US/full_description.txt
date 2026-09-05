@@ -1,0 +1,32 @@
+Infinite feeds are built never to run out. END gives them a bottom.
+
+You pick how much feed exists, for example three screens. When you have used it
+up, the page stops: the END wall covers the feed with a countdown to your next
+one. Tap it and you are out. When the countdown ends, the feed is yours again.
+
+One rule, nothing else. END does not lock your phone, does not nag, does not
+score you and does not report on you.
+
+WHAT YOU CAN SET
+- How much feed counts as enough, from one screen upward.
+- How long the pause lasts.
+- Which apps it applies to.
+- Which sites it applies to when you open them in a browser.
+
+Every feed is counted separately, so reaching the end of one leaves the others
+alone.
+
+PRIVACY
+No account. No analytics. No advertising. No third party code. END has no
+Internet permission, so it cannot send anything anywhere, and nothing about you
+leaves your phone.
+
+END is free software under the GPLv3. The full source is on GitHub, so anyone
+can check exactly what it does and build it themselves.
+
+END uses the Android accessibility service, because that is the only way an app
+can tell that a feed is scrolling. It reads that a feed moved and which app is
+in front. It never reads page text, messages, images or passwords, and it never
+takes over your touches.
+
+by WillSwitch

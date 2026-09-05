@@ -1,0 +1,7 @@
+First public release.
+
+One rule: after the amount of feed you choose, the page stops.
+
+- Works in apps and, per site, in browsers.
+- Every feed counted separately.
+- No account, no analytics, no Internet permission.
