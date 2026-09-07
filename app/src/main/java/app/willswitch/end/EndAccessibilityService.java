@@ -1,10 +1,13 @@
 package app.willswitch.end;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.GestureDescription;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.os.Handler;
 import android.os.Looper;
@@ -26,15 +29,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * END 1.0.
+ * END.
  *
- * One rule: after the chosen amount of feed, the page stops.
+ * One rule: after the chosen amount of feed, the scroll ends.
  *
- * The stop is a wall. When a feed reaches its limit, a full screen END wall
- * is placed over it. The wall takes every touch itself, so nothing underneath
- * can scroll, and it stays until the countdown runs out or the user leaves.
- * Nothing is injected, nothing is captured, nothing races the app: a wall is
- * the only mechanism on Android that is exact on every device and every app.
+ * Not a blocker. When a feed reaches its limit a transparent fence covers the
+ * feed band, with a footer along its bottom edge saying the feed has ended.
+ * The feed stays visible, taps go through to the app, the app's own bars and
+ * Android's navigation stay untouched, and a swipe steps the feed back a page
+ * so nothing that was seen is lost. Only going further is impossible.
  *
  * Counting uses accessibility scroll events, and for feeds that never report
  * scrolling a burst of content changes. Both are gated on a touch having just
@@ -112,8 +115,10 @@ public class EndAccessibilityService extends AccessibilityService {
         readMetrics();
         attachSensor();
 
-        configListener = (prefs, key) ->
-                config = EndPrefs.snapshot(EndAccessibilityService.this);
+        configListener = (prefs, key) -> {
+            config = EndPrefs.snapshot(EndAccessibilityService.this);
+            if (EndPrefs.KEY_RESET.equals(key)) resetAllFeeds();
+        };
         EndPrefs.prefs(this).registerOnSharedPreferenceChangeListener(configListener);
 
         Diag.connected = true;
@@ -440,6 +445,17 @@ public class EndAccessibilityService extends AccessibilityService {
         showWall(state.key);
     }
 
+    /** Manual reset from the settings screen: every feed starts over. */
+    private void resetAllFeeds() {
+        for (FeedState state : feeds.values()) {
+            state.clearLock();
+            EndPrefs.clearLock(this, state.key);
+        }
+        hideWall();
+        Diag.lastProgress = 0f;
+        log("RESET all feeds");
+    }
+
     private void unlock(String key) {
         FeedState state = feeds.get(key);
         if (state != null) state.clearLock();
@@ -448,8 +464,21 @@ public class EndAccessibilityService extends AccessibilityService {
         log("END CLEARED key=" + key);
     }
 
-    // ------------------------------------------------------------------- wall
+    // ------------------------------------------------------------------ fence
 
+    /**
+     * The fence is a transparent window over the feed band only. The app's own
+     * top bar and bottom bar stay uncovered, so its navigation and the browser
+     * address bar keep working natively, and so does Android's gesture bar.
+     *
+     * Inside the band the fence owns the touches:
+     *  - a tap is handed to the app, at the exact spot, as a single tap;
+     *  - a swipe down steps the feed back one page or one item;
+     *  - a swipe up steps forward again, but never past the end;
+     *  - beyond the end, a swipe up only pulls the footer and lets it spring.
+     *
+     * The feed stays visible underneath. Nothing covers the screen.
+     */
     private void showWall(String key) {
         if (windowManager == null) return;
 
@@ -461,139 +490,339 @@ public class EndAccessibilityService extends AccessibilityService {
 
         hideWall();
         wallKey = key;
-
-        final boolean inBrowser = Feeds.isBrowser(Feeds.packageOfKey(key));
+        stepsBack = 0;
 
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(Color.argb(244, 5, 5, 5));
+        root.setBackgroundColor(Color.TRANSPARENT);
         root.setClickable(true);
 
-        LinearLayout column = new LinearLayout(this);
-        column.setOrientation(LinearLayout.VERTICAL);
-        column.setGravity(Gravity.CENTER_HORIZONTAL);
-        column.setPadding(dp(32), 0, dp(32), 0);
+        // Footer along the bottom edge of the band: the end of the list.
+        LinearLayout footer = new LinearLayout(this);
+        footer.setOrientation(LinearLayout.HORIZONTAL);
+        footer.setGravity(Gravity.CENTER_VERTICAL);
+        footer.setPadding(dp(18), dp(10), dp(18), dp(12));
+        footer.setBackgroundColor(Color.argb(238, 6, 6, 6));
 
-        ImageView brand = new ImageView(this);
-        brand.setImageResource(R.drawable.end_brand);
-        brand.setAdjustViewBounds(true);
-        brand.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        brand.setContentDescription("END, make feeds finite, by WillSwitch");
-        column.addView(brand, new LinearLayout.LayoutParams(
-                Math.round(screenWidth * 0.58f), ViewGroup.LayoutParams.WRAP_CONTENT));
+        ImageView mark = new ImageView(this);
+        mark.setImageResource(R.drawable.end_wordmark);
+        mark.setScaleType(ImageView.ScaleType.FIT_START);
+        mark.setContentDescription("END");
+        footer.addView(mark, new LinearLayout.LayoutParams(dp(62), dp(20)));
 
-        wallHeadline = label(headlineFor(key), ACID, 11, Typeface.BOLD);
-        wallHeadline.setLetterSpacing(.18f);
-        wallHeadline.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams headlineLp = wrap();
-        headlineLp.topMargin = dp(44);
-        column.addView(wallHeadline, headlineLp);
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
 
-        wallCountdown = label("--:--", TEXT, 24, Typeface.BOLD);
-        wallCountdown.setGravity(Gravity.CENTER);
+        wallHeadline = label(headlineFor(key), ACID, 10, Typeface.BOLD);
+        wallHeadline.setLetterSpacing(.14f);
+        copy.addView(wallHeadline);
+
+        wallCountdown = label("--:--", TEXT, 12, Typeface.BOLD);
         LinearLayout.LayoutParams countdownLp = wrap();
-        countdownLp.topMargin = dp(10);
-        column.addView(wallCountdown, countdownLp);
+        countdownLp.topMargin = dp(1);
+        copy.addView(wallCountdown, countdownLp);
 
-        TextView hint = label(inBrowser ? "Tap anywhere to go back" : "Tap anywhere to leave",
-                MUTED, 12, Typeface.NORMAL);
-        hint.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams hintLp = wrap();
-        hintLp.topMargin = dp(36);
-        column.addView(hint, hintLp);
+        LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        copyLp.leftMargin = dp(14);
+        footer.addView(copy, copyLp);
 
-        FrameLayout.LayoutParams columnLp = new FrameLayout.LayoutParams(
+        View line = new View(this);
+        line.setBackgroundColor(ACID);
+
+        LinearLayout stack = new LinearLayout(this);
+        stack.setOrientation(LinearLayout.VERTICAL);
+        stack.addView(line, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(2)));
+        stack.addView(footer, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        root.addView(stack, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER);
-        root.addView(column, columnLp);
-        wallColumn = column;
+                Gravity.BOTTOM));
+        wallColumn = stack;
 
-        root.setOnTouchListener(new WallTouch(inBrowser));
+        root.setOnTouchListener(new FenceTouch());
+
+        int top = statusBarHeight() + dp(TOP_STRIP_DP);
+        int bottom = navigationBarHeight() + dp(BOTTOM_STRIP_DP);
+        int height = Math.max(dp(120), realScreenHeight() - top - bottom);
 
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
+                height,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.START;
+        lp.x = 0;
+        lp.y = top;
 
         try {
             windowManager.addView(root, lp);
             wall = root;
+            wallParams = lp;
             Diag.wallUp = true;
-            log("WALL UP key=" + key);
+            log("FENCE UP key=" + key + " band=" + top + ".." + (top + height));
             handler.post(tick);
         } catch (Exception e) {
-            log("WALL FAILED key=" + key, e);
+            log("FENCE FAILED key=" + key, e);
             wall = null;
+            wallParams = null;
             wallColumn = null;
             wallKey = null;
         }
     }
 
-    /**
-     * Owns every touch on the wall. A swipe moves the END card a little and
-     * springs it back, the way the bottom of a finished list behaves. A tap
-     * leaves the feed.
-     */
-    private final class WallTouch implements View.OnTouchListener {
-        private final boolean inBrowser;
+    private static final int TOP_STRIP_DP = 64;
+    private static final int BOTTOM_STRIP_DP = 72;
+    private static final long TAP_MS = 60L;
+    private static final long PASS_THROUGH_SETTLE_MS = 40L;
+    private static final long PASS_THROUGH_TIMEOUT_MS = 450L;
+
+    private WindowManager.LayoutParams wallParams;
+    private boolean passingThrough;
+    private int stepsBack;
+    private final Runnable restoreTouchable = this::restoreTouchable;
+
+    /** Owns every touch inside the band. */
+    private final class FenceTouch implements View.OnTouchListener {
+        private float downX;
         private float downY;
         private long downAt;
         private boolean moved;
-
-        WallTouch(boolean inBrowser) {
-            this.inBrowser = inBrowser;
-        }
+        private boolean handled;
 
         @Override
         public boolean onTouch(View v, MotionEvent event) {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
+                    downX = event.getRawX();
                     downY = event.getRawY();
                     downAt = event.getEventTime();
                     moved = false;
+                    handled = false;
                     return true;
 
                 case MotionEvent.ACTION_MOVE: {
+                    float dx = event.getRawX() - downX;
                     float dy = event.getRawY() - downY;
-                    if (Math.abs(dy) > dp(8)) moved = true;
-                    float limit = dp(56);
-                    float pull = Math.max(-limit, Math.min(limit, dy * 0.28f));
-                    if (wallColumn != null) wallColumn.setTranslationY(pull);
+                    if (!moved && (Math.abs(dx) > dp(10) || Math.abs(dy) > dp(10))) moved = true;
+                    if (!moved || handled) return true;
+
+                    if (Math.abs(dy) >= Math.abs(dx)) {
+                        if (dy < 0 && stepsBack == 0) {
+                            // Past the end: only the footer gives.
+                            float pull = Math.max(-dp(28), dy * 0.18f);
+                            if (wallColumn != null) wallColumn.setTranslationY(pull);
+                        }
+                    }
                     return true;
                 }
 
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL: {
+                case MotionEvent.ACTION_UP: {
+                    float dx = event.getRawX() - downX;
+                    float dy = event.getRawY() - downY;
                     if (wallColumn != null) {
-                        wallColumn.animate().translationY(0f).setDuration(180).start();
+                        wallColumn.animate().translationY(0f).setDuration(160).start();
                     }
-                    boolean tap = !moved && event.getEventTime() - downAt < 350L;
-                    if (tap && event.getActionMasked() == MotionEvent.ACTION_UP) leave();
+
+                    if (!moved) {
+                        if (event.getEventTime() - downAt < 400L) passTap(downX, downY);
+                        return true;
+                    }
+
+                    if (Math.abs(dy) < Math.abs(dx)) return true;
+
+                    if (dy > dp(40)) {
+                        stepFeed(false, downX, downY);
+                    } else if (dy < -dp(40)) {
+                        if (stepsBack > 0) {
+                            stepFeed(true, downX, downY);
+                        } else {
+                            pulseFooter();
+                        }
+                    }
                     return true;
                 }
+
+                case MotionEvent.ACTION_CANCEL:
+                    if (wallColumn != null) {
+                        wallColumn.animate().translationY(0f).setDuration(160).start();
+                    }
+                    return true;
 
                 default:
                     return true;
             }
         }
+    }
 
-        private void leave() {
-            log("WALL leave key=" + wallKey + " browser=" + inBrowser);
-            performGlobalAction(inBrowser ? GLOBAL_ACTION_BACK : GLOBAL_ACTION_HOME);
+    /**
+     * Hand a tap to the app. The fence is made untouchable for a moment, the
+     * tap is dispatched at the exact spot the user touched, and the fence
+     * becomes touchable again when Android reports the tap done.
+     */
+    private void passTap(float x, float y) {
+        if (wall == null || wallParams == null || passingThrough) return;
+
+        passingThrough = true;
+        wallParams.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        try {
+            windowManager.updateViewLayout(wall, wallParams);
+        } catch (Exception e) {
+            passingThrough = false;
+            return;
         }
+
+        handler.removeCallbacks(restoreTouchable);
+        handler.postDelayed(restoreTouchable, PASS_THROUGH_TIMEOUT_MS);
+
+        handler.postDelayed(() -> {
+            Path path = new Path();
+            path.moveTo(x, y);
+            GestureDescription tap;
+            try {
+                tap = new GestureDescription.Builder()
+                        .addStroke(new GestureDescription.StrokeDescription(path, 0, TAP_MS))
+                        .build();
+            } catch (Exception e) {
+                restoreTouchable();
+                return;
+            }
+
+            boolean accepted = dispatchGesture(tap, new GestureResultCallback() {
+                @Override public void onCompleted(GestureDescription d) { restoreTouchable(); }
+                @Override public void onCancelled(GestureDescription d) { restoreTouchable(); }
+            }, handler);
+            if (!accepted) restoreTouchable();
+        }, PASS_THROUGH_SETTLE_MS);
+    }
+
+    private void restoreTouchable() {
+        handler.removeCallbacks(restoreTouchable);
+        passingThrough = false;
+        if (wall == null || wallParams == null) return;
+        if ((wallParams.flags & WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE) == 0) return;
+        wallParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        try {
+            windowManager.updateViewLayout(wall, wallParams);
+        } catch (Exception ignored) {
+            // The fence is gone.
+        }
+    }
+
+    /**
+     * Move the feed one page, or one item, in the direction the user swiped.
+     * Forward steps are only granted back what backward steps took, so the
+     * end stays where it was.
+     */
+    private void stepFeed(boolean forward, float x, float y) {
+        AccessibilityNodeInfo target = null;
+        AccessibilityNodeInfo root = null;
+
+        try {
+            root = getRootInActiveWindow();
+            target = findScrollableAt(root, x, y);
+            if (target == null) {
+                log("STEP no scrollable under finger key=" + wallKey);
+                pulseFooter();
+                return;
+            }
+
+            int action = forward
+                    ? AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                    : AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD;
+            boolean done = target.performAction(action);
+            if (done) stepsBack += forward ? -1 : 1;
+            log("STEP " + (forward ? "forward" : "back") + " ok=" + done
+                    + " stepsBack=" + stepsBack);
+        } catch (Exception e) {
+            log("STEP failed key=" + wallKey, e);
+        } finally {
+            if (target != null && target != root) target.recycle();
+            if (root != null) root.recycle();
+        }
+    }
+
+    /**
+     * Deepest scrollable node whose bounds contain the touch point, preferring
+     * one that scrolls vertically. Falls back to the first scrollable found.
+     */
+    private AccessibilityNodeInfo findScrollableAt(AccessibilityNodeInfo root, float x, float y) {
+        if (root == null) return null;
+        Rect bounds = new Rect();
+        AccessibilityNodeInfo best = null;
+        AccessibilityNodeInfo first = null;
+
+        java.util.ArrayDeque<AccessibilityNodeInfo> stack = new java.util.ArrayDeque<>();
+        stack.push(root);
+        int visited = 0;
+
+        while (!stack.isEmpty() && visited++ < 400) {
+            AccessibilityNodeInfo node = stack.pop();
+            if (node == null) continue;
+
+            boolean keep = false;
+            if (node.isScrollable()) {
+                if (first == null) {
+                    first = node;
+                    keep = true;
+                }
+                node.getBoundsInScreen(bounds);
+                if (bounds.contains((int) x, (int) y)) {
+                    if (best != null && best != first && best != root) best.recycle();
+                    best = node;
+                    keep = true;
+                }
+            }
+
+            int count = node.getChildCount();
+            for (int i = count - 1; i >= 0; i--) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) stack.push(child);
+            }
+
+            if (!keep && node != root) node.recycle();
+        }
+
+        if (best != null) {
+            if (first != null && first != best && first != root) first.recycle();
+            return best;
+        }
+        return first;
     }
 
     private String headlineFor(String key) {
         String pkg = Feeds.packageOfKey(key);
-        if (key.equals(pkg)) return "YOU HAVE REACHED THE END";
+        if (key.equals(pkg)) return "END OF FEED";
         return key.substring(pkg.length() + 1).toUpperCase() + " HAS ENDED";
+    }
+
+    private void pulseFooter() {
+        if (wallColumn == null || wallHeadline == null) return;
+
+        final String original = wallHeadline.getText().toString();
+        wallHeadline.setText("NOTHING BELOW THIS");
+
+        wallColumn.animate()
+                .translationY(-dp(10))
+                .setDuration(70)
+                .withEndAction(() -> wallColumn.animate().translationY(0f).setDuration(180).start())
+                .start();
+
+        handler.postDelayed(() -> {
+            if (wallHeadline != null) wallHeadline.setText(original);
+        }, 900L);
     }
 
     private void hideWall() {
         handler.removeCallbacks(tick);
+        handler.removeCallbacks(restoreTouchable);
+        passingThrough = false;
 
         if (wall != null && windowManager != null) {
             try {
@@ -604,11 +833,33 @@ public class EndAccessibilityService extends AccessibilityService {
         }
 
         wall = null;
+        wallParams = null;
         wallColumn = null;
         wallHeadline = null;
         wallCountdown = null;
         wallKey = null;
         Diag.wallUp = false;
+    }
+
+    private int statusBarHeight() {
+        int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        return id > 0 ? getResources().getDimensionPixelSize(id) : dp(28);
+    }
+
+    private int navigationBarHeight() {
+        int id = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
+        return id > 0 ? getResources().getDimensionPixelSize(id) : dp(48);
+    }
+
+    private int realScreenHeight() {
+        try {
+            android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
+            windowManager.getDefaultDisplay().getRealMetrics(metrics);
+            if (metrics.heightPixels > 0) return metrics.heightPixels;
+        } catch (Exception ignored) {
+            // Fall through to the app-visible height.
+        }
+        return screenHeight;
     }
 
     private LinearLayout.LayoutParams wrap() {

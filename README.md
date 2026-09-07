@@ -9,29 +9,39 @@ used up, the page stops.
 
 ## What it does
 
-One rule: after the chosen amount of feed, the page stops.
+One rule: after the chosen amount of feed, the scroll ends.
 
 - Default: 3 screens, then 20 minutes of no feed. Both adjustable.
-- The stop is a wall. The END wall covers the feed with the countdown. A tap
-  leaves the feed. A swipe pulls the card a little and springs back, the way
-  the bottom of a finished list behaves.
+- The end is a fence, not a wall. A footer marks the end of the feed. The feed
+  stays visible, taps still reach the app, the app's own bars and Android's
+  navigation keep working, and a swipe down steps back a page through what
+  you already saw. Only going further is impossible.
 - Nothing else changes. Other apps, notifications, back, home, the shade: all
-  untouched. Nothing is injected, nothing is captured.
+  untouched.
 - Feeds are separate. Ending Reddit does not end Instagram. Ending reddit.com
   in Brave does not end the Reddit app.
 
 Works on Android 9 and up.
 
-## Why a wall
+## How the fence works
 
-Three earlier builds tried to keep the ended feed usable and only refuse the
-forward swipe. That needs either touch capture with gesture injection, which
-freezes the app on devices where the injected stroke does not arrive, or
-scrolling the feed back with accessibility actions, which fights the user and
-does nothing in apps that hide their list from the accessibility tree.
+A transparent accessibility overlay covers the feed band: everything between
+the app's top bar and its bottom bar. The band owns the touches inside it.
 
-A wall is the only mechanism on Android that is exact on every device and in
-every app, and it costs nothing while you scroll. So 1.0 is a wall.
+- A tap is handed to the app as a single tap at the same spot: the fence goes
+  untouchable for a moment, the tap is dispatched, the fence comes back.
+- A swipe down performs `ACTION_SCROLL_BACKWARD` on the scrollable node under
+  the finger: one page, or one item in Shorts and Reels.
+- A swipe up performs `ACTION_SCROLL_FORWARD`, but only as many times as the
+  user stepped back. The end stays where it was.
+- Beyond the end, a swipe up pulls the footer a little and lets it spring.
+
+Nothing autonomous happens. Every action END performs is the user's own tap
+or swipe, at the moment they make it. Earlier builds tried touch capture with
+gesture injection (froze the app on devices where the injected stroke did not
+arrive), automatic scroll-back on scroll events (fought the user), and a full
+screen wall (an app blocker, not an ending scroll). The fence is what those
+were trying to be.
 
 ## Counting
 

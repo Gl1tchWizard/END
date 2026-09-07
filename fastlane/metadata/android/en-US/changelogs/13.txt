@@ -1,0 +1,2 @@
+- The end of a feed is now a fence, not a full screen wall. The feed stays visible, taps still work, the app's own bars and Android navigation keep working, and a swipe down steps back through what you already saw.
+- Reset all feeds now, in the status card.

@@ -26,6 +26,7 @@ public final class EndPrefs {
     private static final String KEY_ENABLED_APPS = "enabled_apps";
     private static final String KEY_ENABLED_HOSTS = "enabled_hosts";
     private static final String KEY_BROWSER_SITES = "browser_sites_enabled";
+    static final String KEY_RESET = "reset_epoch";
 
     public static SharedPreferences prefs(Context c) {
         return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -132,6 +133,11 @@ public final class EndPrefs {
 
     public static void setBrowserSitesEnabled(Context c, boolean enabled) {
         prefs(c).edit().putBoolean(KEY_BROWSER_SITES, enabled).apply();
+    }
+
+    /** Bumps a counter the service listens for; it then clears every feed. */
+    public static void requestReset(Context c) {
+        prefs(c).edit().putLong(KEY_RESET, System.currentTimeMillis()).apply();
     }
 
     // Lock state survives a service restart, so it is the one piece of session

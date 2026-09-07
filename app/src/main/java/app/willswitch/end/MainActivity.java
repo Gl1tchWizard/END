@@ -127,7 +127,7 @@ public class MainActivity extends Activity {
 
         root.addView(spacer(28));
         root.addView(sectionTitle("RESET"));
-        root.addView(body("When END appears, reopening the app does not reset it."));
+        root.addView(body("How long the feed stays ended. Reopening the app does not reset it."));
         root.addView(spacer(12));
         root.addView(choiceRow(new int[]{5,10,20,30,60}, EndPrefs.cooldownMinutes(this), value -> {
             EndPrefs.setCooldownMinutes(this, value);
@@ -136,7 +136,7 @@ public class MainActivity extends Activity {
 
         root.addView(spacer(30));
         root.addView(sectionTitle("MAKE THESE FINITE"));
-        root.addView(body("END counts how much feed you scroll in the apps you select. When the limit is reached, the page stops: the END wall covers the feed until the countdown runs out. Tap the wall to leave. Everything else on your phone works as usual."));
+        root.addView(body("END counts how much feed you scroll in the apps you select. When the limit is reached, the scroll ends: a footer marks the end of the feed and nothing further loads until the countdown runs out. The feed stays visible, taps still work, and a swipe down steps back through what you already saw."));
         root.addView(spacer(10));
         for (AppSpec app : APPS) root.addView(appRow(app));
 
@@ -252,6 +252,19 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         dLp.topMargin = dp(14);
         card.addView(diagnostics, dLp);
+
+        TextView reset = new TextView(this);
+        reset.setTextColor(ACID);
+        reset.setTextSize(12);
+        reset.setTypeface(Typeface.DEFAULT_BOLD);
+        reset.setText("Reset all feeds now");
+        reset.setPadding(0, dp(14), 0, dp(4));
+        reset.setOnClickListener(v -> {
+            EndPrefs.requestReset(this);
+            reset.setText("Reset done");
+            handler.postDelayed(() -> reset.setText("Reset all feeds now"), 1500L);
+        });
+        card.addView(reset);
 
         logToggle = new TextView(this);
         logToggle.setTextColor(ACID);
@@ -513,7 +526,7 @@ public class MainActivity extends Activity {
         box.setPadding(dp(24), dp(8), dp(24), 0);
 
         TextView copy = new TextView(this);
-        copy.setText("END uses Android Accessibility to detect feed activity and the name of the app currently on screen. It uses those events only to count scrolling in the apps and sites you choose. To tell scrolling from autoplay, END is notified that you touched the screen, without coordinates.\n\nIf you switch on browser feeds, END also reads the address bar of the browsers it supports, so it can tell reddit.com from instagram.com. It keeps only the host, never the path or the query, and it never reads the page itself.\n\nOnce your limit is reached, END places its wall over that feed until the countdown runs out. Tap the wall to leave. Other apps, notifications and navigation are untouched.\n\nEND does not retrieve, save or transmit screen content, text, images, messages or passwords. END has no Internet permission. Everything stays on this device.\n\nYou can disable END at any time in Android Accessibility settings.");
+        copy.setText("END uses Android Accessibility to detect feed activity and the name of the app currently on screen. It uses those events only to count scrolling in the apps and sites you choose. To tell scrolling from autoplay, END is notified that you touched the screen, without coordinates.\n\nIf you switch on browser feeds, END also reads the address bar of the browsers it supports, so it can tell reddit.com from instagram.com. It keeps only the host, never the path or the query, and it never reads the page itself.\n\nOnce your limit is reached, END ends that feed: a footer marks the end and scrolling further is stopped until the countdown runs out. Taps you make on the feed are passed to the app at the same spot, and a swipe steps the feed back one page. END never performs any action you did not just make yourself. Other apps, notifications and navigation are untouched.\n\nEND does not retrieve, save or transmit screen content, text, images, messages or passwords. END has no Internet permission. Everything stays on this device.\n\nYou can disable END at any time in Android Accessibility settings.");
         copy.setTextColor(Color.rgb(45,45,45));
         copy.setTextSize(14);
         copy.setLineSpacing(0,1.16f);
