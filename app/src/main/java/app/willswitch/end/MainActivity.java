@@ -176,7 +176,7 @@ public class MainActivity extends Activity {
         card.setBackgroundColor(PANEL);
 
         TextView title = new TextView(this);
-        title.setText("END SERVICE");
+        title.setText("END SERVICE  \u00b7  " + BuildConfig.VERSION_NAME);
         title.setTextColor(MUTED);
         title.setTextSize(10);
         title.setTypeface(Typeface.DEFAULT_BOLD);

@@ -38,7 +38,7 @@ android {
         minSdk 28
         targetSdk 36
         versionCode 11
-        versionName '1.0.1'
+        versionName 'v11'
     }
 
     if (hasSigningKey) {
@@ -60,6 +60,10 @@ android {
                 signingConfig signingConfigs.release
             }
         }
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     compileOptions {
