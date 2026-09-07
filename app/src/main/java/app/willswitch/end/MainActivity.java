@@ -4,7 +4,11 @@ import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.ActivityNotFoundException;
+import android.content.ComponentName;
 import android.content.Intent;
+import android.os.Handler;
+import android.os.Looper;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
@@ -37,6 +41,16 @@ public class MainActivity extends Activity {
 
     private TextView serviceStatus;
     private Button enableButton;
+    private Button doneButton;
+    private TextView guide;
+    private TextView diagnostics;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable refresh = new Runnable() {
+        @Override public void run() {
+            updateServiceStatus();
+            handler.postDelayed(this, 1000);
+        }
+    };
 
     private static final AppSpec[] APPS = new AppSpec[] {
             new AppSpec("Instagram", "com.instagram.android", "feed · Reels · Explore"),
@@ -74,7 +88,14 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        updateServiceStatus();
+        handler.removeCallbacks(refresh);
+        handler.post(refresh);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        handler.removeCallbacks(refresh);
     }
 
     private void render() {
@@ -182,14 +203,69 @@ public class MainActivity extends Activity {
                 showDisclosure();
                 return;
             }
-            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            openEndAccessibilityPage();
         });
         LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
         bLp.topMargin = dp(14);
         card.addView(enableButton, bLp);
 
+        guide = new TextView(this);
+        guide.setTextColor(Color.rgb(200, 200, 200));
+        guide.setTextSize(13);
+        guide.setLineSpacing(0, 1.25f);
+        guide.setText("Android opens on Accessibility. From there:\n\n1.  Installed apps\n2.  END\n3.  Switch it on and confirm\n\nThen come back here.");
+        LinearLayout.LayoutParams gLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        gLp.topMargin = dp(14);
+        card.addView(guide, gLp);
+
+        diagnostics = new TextView(this);
+        diagnostics.setTextColor(Color.rgb(200, 200, 200));
+        diagnostics.setTextSize(12);
+        diagnostics.setLineSpacing(0, 1.25f);
+        diagnostics.setTypeface(Typeface.MONOSPACE);
+        LinearLayout.LayoutParams dLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        dLp.topMargin = dp(14);
+        card.addView(diagnostics, dLp);
+
+        doneButton = new Button(this);
+        doneButton.setAllCaps(false);
+        doneButton.setText("Done. Close END");
+        doneButton.setTextColor(TEXT);
+        doneButton.setTextSize(13);
+        doneButton.setTypeface(Typeface.DEFAULT_BOLD);
+        doneButton.setBackgroundColor(LINE);
+        doneButton.setOnClickListener(v -> finishAndRemoveTask());
+        LinearLayout.LayoutParams doneLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
+        doneLp.topMargin = dp(14);
+        card.addView(doneButton, doneLp);
+
         return card;
+    }
+
+    /**
+     * Jump straight to END's own page in Accessibility settings. Android and
+     * One UI honour the fragment arguments on most versions; where they do
+     * not, the generic list opens and the guide underneath says where to go.
+     */
+    private void openEndAccessibilityPage() {
+        String component = new ComponentName(this, EndAccessibilityService.class).flattenToString();
+        Bundle args = new Bundle();
+        args.putString(":settings:fragment_args_key", component);
+
+        Intent direct = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+        direct.putExtra(":settings:fragment_args_key", component);
+        direct.putExtra(":settings:show_fragment_args", args);
+        direct.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+        try {
+            startActivity(direct);
+        } catch (ActivityNotFoundException e) {
+            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+        }
     }
 
     private View choiceRow(int[] values, int selected, IntChoice listener, String suffix) {
@@ -340,6 +416,51 @@ public class MainActivity extends Activity {
         serviceStatus.setText(enabled ? "ACTIVE" : "OFF");
         serviceStatus.setTextColor(enabled ? ACID : Color.rgb(200,200,200));
         enableButton.setText(enabled ? "Accessibility settings" : "Enable in Android settings");
+
+        guide.setVisibility(enabled ? View.GONE : View.VISIBLE);
+        doneButton.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        diagnostics.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        if (enabled) diagnostics.setText(diagnosticsText());
+    }
+
+    /**
+     * Live view of what the service sees. Open a feed, scroll, come back:
+     * the numbers tell you whether END is counting without needing Logcat.
+     */
+    private String diagnosticsText() {
+        long now = System.currentTimeMillis();
+        StringBuilder out = new StringBuilder();
+
+        out.append("service   ").append(Diag.connected ? "connected" : "enabled, not connected yet").append('\n');
+        out.append("touch     ").append(Diag.sensorAlive
+                ? ago(now - Diag.lastTouchAt) : "sensor silent, gate open").append('\n');
+        out.append("feed      ").append(Diag.lastFeed == null ? "none seen yet" : shortKey(Diag.lastFeed)).append('\n');
+        if (Diag.lastFeed != null) {
+            out.append("progress  ").append(String.format("%.1f / %d", Diag.lastProgress, EndPrefs.screens(this))).append('\n');
+            out.append("signals   ").append(Diag.scrollEvents).append(" scroll, ")
+                    .append(Diag.burstCounts).append(" burst").append('\n');
+            out.append("last      ").append(Diag.lastFeedEventAt == 0 ? "never" : ago(now - Diag.lastFeedEventAt)).append('\n');
+        }
+        out.append("wall      ").append(Diag.wallUp ? "up" : "down");
+        return out.toString();
+    }
+
+    private static String shortKey(String key) {
+        int hash = key.indexOf('#');
+        if (hash >= 0) return key.substring(hash + 1) + " in " + tail(key.substring(0, hash));
+        return tail(key);
+    }
+
+    private static String tail(String pkg) {
+        int dot = pkg.lastIndexOf('.');
+        return dot >= 0 ? pkg.substring(dot + 1) : pkg;
+    }
+
+    private static String ago(long ms) {
+        if (ms < 0 || ms > 3_600_000L) return "long ago";
+        if (ms < 1000) return "just now";
+        if (ms < 60_000) return (ms / 1000) + "s ago";
+        return (ms / 60_000) + "m ago";
     }
 
     private boolean isEndServiceEnabled() {
