@@ -1,0 +1,11 @@
+First public release.
+
+One rule: after the amount of feed you choose, the page stops.
+
+- Works in apps and, per site, in browsers.
+- Every feed counted separately.
+- No account, no analytics, no Internet permission.
+- Setup: opens END's own page in Accessibility settings, with a guide for when Android lands on the list instead.
+- Setup: a Done button, and a live status card that shows whether END is counting.
+- Fix: counting could stay switched off on devices where the touch sensor never reports.
+- Fix: a keyboard or system dialog could be mistaken for the foreground app, which stopped counting in browsers.
