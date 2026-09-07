@@ -1,5 +1,6 @@
 package app.willswitch.end;
 
+import android.graphics.Rect;
 import android.view.accessibility.AccessibilityEvent;
 
 /**
@@ -41,6 +42,23 @@ final class FeedState {
     long lockedUntil;
     long lastActivityAt;
 
+    /** The scrollable that carries this feed, learned from scroll events. */
+    String feedViewId;
+    Rect feedBounds;
+
+    /**
+     * Where the feed stands, in items for item feeds and in pixels for the
+     * rest, and where the end was pinned. Only events from the feed's own
+     * scrollable move it, so a different list in the same app cannot confuse
+     * the end.
+     */
+    boolean positionKnown;
+    float position;
+    float endPosition;
+
+    /** True while the feed is at its end and the fence must hold. */
+    boolean atEnd = true;
+
     private int lastItemIndex = NO_VALUE;
     private int lastScrollY = NO_VALUE;
     private long lastBlindStepAt;
@@ -70,6 +88,8 @@ final class FeedState {
 
     void reset() {
         progress = 0f;
+        atEnd = true;
+        endPosition = 0f;
         lastItemIndex = NO_VALUE;
         lastScrollY = NO_VALUE;
         lastBlindStepAt = 0L;
@@ -82,6 +102,54 @@ final class FeedState {
     void clearLock() {
         lockedUntil = 0L;
         reset();
+    }
+
+    /** Pin the end of the feed to wherever it stands right now. */
+    void pinEnd() {
+        endPosition = position;
+        atEnd = true;
+    }
+
+    /**
+     * Update the position from a scroll event. Returns false when the event
+     * carries nothing usable.
+     */
+    boolean observePosition(AccessibilityEvent event) {
+        if (profile == Feeds.PROFILE_ITEM) {
+            int from = event.getFromIndex();
+            if (from >= 0) {
+                position = from;
+                positionKnown = true;
+                return true;
+            }
+        }
+
+        int scrollY = event.getScrollY();
+        if (scrollY >= 0) {
+            position = scrollY;
+            positionKnown = true;
+            return true;
+        }
+
+        int dy = event.getScrollDeltaY();
+        if (dy != 0 && dy != -1) {
+            position += dy;
+            positionKnown = true;
+            return true;
+        }
+
+        int from = event.getFromIndex();
+        if (from >= 0) {
+            position = from;
+            positionKnown = true;
+            return true;
+        }
+        return false;
+    }
+
+    /** How far past the end the feed stands, in the feed's own unit. */
+    float overshoot() {
+        return position - endPosition;
     }
 
     /** Screens consumed by this scroll event. Backward movement counts 0. */

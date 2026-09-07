@@ -9,6 +9,8 @@ import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -243,9 +245,14 @@ public class EndAccessibilityService extends AccessibilityService {
         FeedState state = stateFor(activeKey);
 
         if (state.isLocked(now)) {
-            // Self healing: if the wall is somehow not up while a locked feed is
-            // producing events, raise it again.
-            if (wall == null) showWall(activeKey);
+            if (type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
+                learnFeedNode(state, event, now);
+                onScrolledWhileEnded(state, event, now);
+            } else if (state.atEnd && wall == null) {
+                // Self healing: an ended feed is producing events and the
+                // fence is not up. Raise it.
+                showWall(activeKey);
+            }
             if (Feeds.isBrowser(pkg) && type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
                 pollBrowserHost(pkg, now);
             }
@@ -255,6 +262,7 @@ public class EndAccessibilityService extends AccessibilityService {
         if (type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
             Diag.scrollEvents++;
             Diag.lastFeedEventAt = now;
+            learnFeedNode(state, event, now);
             if (!touchedWithin(TOUCH_GATE_SCROLL_MS, now)) return;
             expireStaleProgress(state, now);
             addProgress(state, state.measureScroll(event, screenHeight, now), now);
@@ -271,6 +279,119 @@ public class EndAccessibilityService extends AccessibilityService {
                 expireStaleProgress(state, now);
                 addProgress(state, contribution, now);
             }
+        }
+    }
+
+    private long lastLearnAt;
+
+    /**
+     * Remember which scrollable carries the feed and where it sits on screen.
+     * The fence is drawn over exactly that node, so its footer lands on the
+     * real bottom edge of the page and nothing shows underneath.
+     */
+    private void learnFeedNode(FeedState state, AccessibilityEvent event, long now) {
+        if (now - lastLearnAt < 600L) return;
+        lastLearnAt = now;
+
+        AccessibilityNodeInfo source = null;
+        try {
+            source = event.getSource();
+            if (source == null) return;
+
+            String id = source.getViewIdResourceName();
+            Rect bounds = new Rect();
+            source.getBoundsInScreen(bounds);
+            if (bounds.height() < dp(120)) return;
+
+            if (state.feedViewId != null && id != null && !id.equals(state.feedViewId)
+                    && state.isLocked(now)) {
+                // Another list scrolled; the end belongs to the first one.
+                return;
+            }
+
+            boolean changed = state.feedBounds == null || !bounds.equals(state.feedBounds)
+                    || (id != null && !id.equals(state.feedViewId));
+            state.feedViewId = id;
+            state.feedBounds = bounds;
+            if (changed) log("FEED NODE " + id + " " + bounds.toShortString());
+        } catch (Exception ignored) {
+            // The node went away.
+        } finally {
+            if (source != null) source.recycle();
+        }
+    }
+
+    /**
+     * The state machine of an ended feed.
+     *
+     * At the end the fence holds. Above the end there is no fence at all and
+     * scrolling is native. The feed's own scroll events say which of the two
+     * applies, and pull it back when it slipped past the end.
+     */
+    private void onScrolledWhileEnded(FeedState state, AccessibilityEvent event, long now) {
+        if (!state.positionKnown) return;
+
+        // Events from a different list in the same app say nothing about the
+        // feed that ended.
+        if (state.feedViewId != null) {
+            AccessibilityNodeInfo source = event.getSource();
+            if (source != null) {
+                String id = source.getViewIdResourceName();
+                source.recycle();
+                if (id != null && !id.equals(state.feedViewId)) return;
+            }
+        }
+
+        if (!state.observePosition(event)) return;
+
+        float slack = state.profile == Feeds.PROFILE_ITEM ? 0f : screenHeight * 0.15f;
+        float overshoot = state.overshoot();
+
+        if (overshoot >= -slack) {
+            if (!state.atEnd) {
+                state.atEnd = true;
+                log("END reached again pos=" + state.position);
+                showWall(state.key);
+            }
+            float tolerance = state.profile == Feeds.PROFILE_ITEM ? 0.5f : screenHeight * 0.2f;
+            if (overshoot > tolerance) pullBackToEnd(state, now);
+        } else if (state.atEnd) {
+            state.atEnd = false;
+            log("ABOVE end pos=" + state.position + " end=" + state.endPosition);
+            hideWall();
+        }
+    }
+
+    private long lastPullAt;
+
+    /** The feed slipped past its end. Bring it back, once per half second. */
+    private void pullBackToEnd(FeedState state, long now) {
+        if (now - lastPullAt < 500L) return;
+        lastPullAt = now;
+
+        AccessibilityNodeInfo root = null;
+        AccessibilityNodeInfo node = null;
+        try {
+            root = getRootInActiveWindow();
+            node = feedNode(state, root, -1f, -1f);
+            if (node == null) return;
+
+            boolean done = false;
+            if (state.profile == Feeds.PROFILE_ITEM && Build.VERSION.SDK_INT >= 23) {
+                Bundle args = new Bundle();
+                args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_ROW_INT, Math.round(state.endPosition));
+                args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_COLUMN_INT, 0);
+                done = node.performAction(
+                        AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_TO_POSITION.getId(), args);
+            }
+            if (!done) done = node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
+            log("PULL back to end ok=" + done + " overshoot=" + state.overshoot());
+            pulseFooter();
+        } catch (Exception e) {
+            log("PULL failed", e);
+        } finally {
+            if (node != null && node != root) node.recycle();
+            if (root != null) root.recycle();
         }
     }
 
@@ -415,7 +536,10 @@ public class EndAccessibilityService extends AccessibilityService {
             if (wallKey != null) log("WALL DOWN because feed is now " + activeKey);
             hideWall();
         }
-        if (activeKey != null && stateFor(activeKey).isLocked(now)) showWall(activeKey);
+        if (activeKey != null) {
+            FeedState state = stateFor(activeKey);
+            if (state.isLocked(now) && state.atEnd) showWall(activeKey);
+        }
     }
 
     private FeedState stateFor(String key) {
@@ -439,9 +563,11 @@ public class EndAccessibilityService extends AccessibilityService {
         state.progress = config.screens;
         state.lockedUntil = now + config.cooldownMillis();
         state.lastActivityAt = now;
+        state.pinEnd();
         EndPrefs.setLockedUntil(this, state.key, state.lockedUntil);
 
-        log("END REACHED key=" + state.key);
+        log("END REACHED key=" + state.key + " at=" + state.position
+                + (state.positionKnown ? "" : " (position unknown)"));
         showWall(state.key);
     }
 
@@ -449,6 +575,7 @@ public class EndAccessibilityService extends AccessibilityService {
     private void resetAllFeeds() {
         for (FeedState state : feeds.values()) {
             state.clearLock();
+            state.positionKnown = false;
             EndPrefs.clearLock(this, state.key);
         }
         hideWall();
@@ -500,8 +627,8 @@ public class EndAccessibilityService extends AccessibilityService {
         LinearLayout footer = new LinearLayout(this);
         footer.setOrientation(LinearLayout.HORIZONTAL);
         footer.setGravity(Gravity.CENTER_VERTICAL);
-        footer.setPadding(dp(18), dp(10), dp(18), dp(12));
-        footer.setBackgroundColor(Color.argb(238, 6, 6, 6));
+        footer.setPadding(dp(18), dp(14), dp(18), dp(18));
+        footer.setBackgroundColor(Color.rgb(5, 5, 5));
 
         ImageView mark = new ImageView(this);
         mark.setImageResource(R.drawable.end_wordmark);
@@ -544,9 +671,25 @@ public class EndAccessibilityService extends AccessibilityService {
 
         root.setOnTouchListener(new FenceTouch());
 
-        int top = statusBarHeight() + dp(TOP_STRIP_DP);
-        int bottom = navigationBarHeight() + dp(BOTTOM_STRIP_DP);
-        int height = Math.max(dp(120), realScreenHeight() - top - bottom);
+        int screenBottom = realScreenHeight() - navigationBarHeight();
+        int top;
+        int height;
+        FeedState state = feeds.get(key);
+        Rect feed = state != null ? state.feedBounds : null;
+
+        if (feed != null && feed.height() >= dp(120)) {
+            // The fence is exactly the feed's own list. Its footer lands on
+            // the real bottom edge of the page.
+            top = Math.max(statusBarHeight(), feed.top);
+            int bottom = Math.min(feed.bottom, screenBottom);
+            boolean fullBleed = bottom >= screenBottom - dp(8) && !Feeds.isBrowser(Feeds.packageOfKey(key));
+            if (fullBleed) bottom -= dp(56);   // an app bar drawn over the feed
+            height = Math.max(dp(120), bottom - top);
+        } else {
+            top = statusBarHeight() + dp(TOP_STRIP_DP);
+            int bottom = navigationBarHeight() + dp(BOTTOM_STRIP_DP);
+            height = Math.max(dp(120), realScreenHeight() - top - bottom);
+        }
 
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -721,31 +864,116 @@ public class EndAccessibilityService extends AccessibilityService {
      * end stays where it was.
      */
     private void stepFeed(boolean forward, float x, float y) {
+        FeedState state = wallKey == null ? null : feeds.get(wallKey);
         AccessibilityNodeInfo target = null;
         AccessibilityNodeInfo root = null;
 
         try {
             root = getRootInActiveWindow();
-            target = findScrollableAt(root, x, y);
+            target = feedNode(state, root, x, y);
             if (target == null) {
-                log("STEP no scrollable under finger key=" + wallKey);
+                log("STEP no scrollable found key=" + wallKey);
                 pulseFooter();
                 return;
             }
 
-            int action = forward
+            boolean done = target.performAction(forward
                     ? AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-                    : AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD;
-            boolean done = target.performAction(action);
-            if (done) stepsBack += forward ? -1 : 1;
-            log("STEP " + (forward ? "forward" : "back") + " ok=" + done
-                    + " stepsBack=" + stepsBack);
+                    : AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
+            if (!done && Build.VERSION.SDK_INT >= 29) {
+                done = target.performAction((forward
+                        ? AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN
+                        : AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP).getId());
+            }
+            log("STEP " + (forward ? "forward" : "back") + " ok=" + done);
+            if (!done) {
+                pulseFooter();
+                return;
+            }
+
+            if (state != null && state.positionKnown && !forward) {
+                // The feed's own scroll event will confirm we are above the
+                // end and take the fence down; until then, assume it.
+                state.atEnd = false;
+                hideWall();
+                log("ABOVE end after step, fence down, scrolling is native now");
+            } else {
+                stepsBack += forward ? -1 : 1;
+            }
         } catch (Exception e) {
             log("STEP failed key=" + wallKey, e);
         } finally {
             if (target != null && target != root) target.recycle();
             if (root != null) root.recycle();
         }
+    }
+
+    /**
+     * The node that carries the feed: by the id learned from its scroll
+     * events, else the scrollable under the finger, else the largest
+     * scrollable on screen.
+     */
+    private AccessibilityNodeInfo feedNode(FeedState state, AccessibilityNodeInfo root, float x, float y) {
+        if (root == null) return null;
+
+        if (state != null && state.feedViewId != null) {
+            try {
+                List<AccessibilityNodeInfo> byId = root.findAccessibilityNodeInfosByViewId(state.feedViewId);
+                if (byId != null) {
+                    AccessibilityNodeInfo pick = null;
+                    for (AccessibilityNodeInfo node : byId) {
+                        if (node == null) continue;
+                        if (pick == null && node.isScrollable()) pick = node; else node.recycle();
+                    }
+                    if (pick != null) return pick;
+                }
+            } catch (Exception ignored) {
+                // Fall through.
+            }
+        }
+
+        if (x >= 0f && y >= 0f) {
+            AccessibilityNodeInfo under = findScrollableAt(root, x, y);
+            if (under != null) return under;
+        }
+
+        return largestScrollable(root);
+    }
+
+    private AccessibilityNodeInfo largestScrollable(AccessibilityNodeInfo root) {
+        Rect bounds = new Rect();
+        AccessibilityNodeInfo best = null;
+        int bestArea = 0;
+
+        java.util.ArrayDeque<AccessibilityNodeInfo> stack = new java.util.ArrayDeque<>();
+        stack.push(root);
+        int visited = 0;
+
+        while (!stack.isEmpty() && visited++ < 400) {
+            AccessibilityNodeInfo node = stack.pop();
+            if (node == null) continue;
+
+            boolean keep = false;
+            if (node.isScrollable()) {
+                node.getBoundsInScreen(bounds);
+                int area = bounds.width() * bounds.height();
+                if (area > bestArea) {
+                    if (best != null && best != root) best.recycle();
+                    best = node;
+                    bestArea = area;
+                    keep = true;
+                }
+            }
+
+            int count = node.getChildCount();
+            for (int i = count - 1; i >= 0; i--) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) stack.push(child);
+            }
+
+            if (!keep && node != root) node.recycle();
+        }
+        return best;
     }
 
     /**

@@ -25,23 +25,31 @@ Works on Android 9 and up.
 
 ## How the fence works
 
-A transparent accessibility overlay covers the feed band: everything between
-the app's top bar and its bottom bar. The band owns the touches inside it.
+END learns which scrollable node carries the feed from the feed's own scroll
+events, and where that node sits on screen. When the limit is reached, a
+transparent accessibility overlay is placed over exactly that node, with an
+opaque footer along its bottom edge. The footer therefore lands on the real
+bottom of the page; there is nothing under it.
 
-- A tap is handed to the app as a single tap at the same spot: the fence goes
-  untouchable for a moment, the tap is dispatched, the fence comes back.
-- A swipe down performs `ACTION_SCROLL_BACKWARD` on the scrollable node under
-  the finger: one page, or one item in Shorts and Reels.
-- A swipe up performs `ACTION_SCROLL_FORWARD`, but only as many times as the
-  user stepped back. The end stays where it was.
-- Beyond the end, a swipe up pulls the footer a little and lets it spring.
+At the end the fence holds:
+- a tap is handed to the app as a single tap at the same spot: the fence goes
+  untouchable for a moment, the tap is dispatched, the fence comes back;
+- a swipe up pulls the footer a little and lets it spring;
+- a swipe down performs one `ACTION_SCROLL_BACKWARD` on the feed node, and
+  then the fence goes away entirely.
+
+Above the end there is no fence. Scrolling is native, in both directions, as
+smooth as it always was. The feed's own scroll events say where it stands
+relative to the pinned end; when it reaches the end again the fence comes
+back, and if it slipped past, END pulls it back once. That is the bottom of
+an ordinary web page: you can read everything you saw, you cannot go further.
+
+For a feed that reports no position at all, the fence stays up and a swipe
+steps one page back or forward instead, never past the end.
 
 Nothing autonomous happens. Every action END performs is the user's own tap
-or swipe, at the moment they make it. Earlier builds tried touch capture with
-gesture injection (froze the app on devices where the injected stroke did not
-arrive), automatic scroll-back on scroll events (fought the user), and a full
-screen wall (an app blocker, not an ending scroll). The fence is what those
-were trying to be.
+or swipe, at the moment they make it, plus the one pull-back when a fling
+crosses the end.
 
 ## Counting
 

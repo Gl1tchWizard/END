@@ -1,0 +1,2 @@
+- The end sits on the real bottom edge of the feed. END measures the feed's own list and puts the footer exactly there: nothing shows below it.
+- Scrolling back is native. Swipe down at the end once, and the fence is gone until you reach the end again, like the bottom of an ordinary web page.
