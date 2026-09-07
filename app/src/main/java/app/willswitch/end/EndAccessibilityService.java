@@ -75,6 +75,14 @@ public class EndAccessibilityService extends AccessibilityService {
     private String activeKey;
     private long lastUrlPollAt;
     private long lastTouchAt;
+    private long lastResolveAt;
+
+    /**
+     * Whether the touch sensor has ever reported anything. Until it has, the
+     * touch gate is open: a sensor that stays silent on some device must not
+     * be able to switch counting off entirely.
+     */
+    private boolean sensorAlive;
 
     private final Runnable tick = new Runnable() {
         @Override public void run() {
@@ -108,6 +116,7 @@ public class EndAccessibilityService extends AccessibilityService {
                 config = EndPrefs.snapshot(EndAccessibilityService.this);
         EndPrefs.prefs(this).registerOnSharedPreferenceChangeListener(configListener);
 
+        Diag.connected = true;
         Log.i(TAG, "SERVICE CONNECTED limit=" + config.screens
                 + " cooldown=" + config.cooldownMinutes
                 + " apps=" + config.apps.size());
@@ -140,6 +149,12 @@ public class EndAccessibilityService extends AccessibilityService {
         view.setOnTouchListener((v, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_OUTSIDE) {
                 lastTouchAt = System.currentTimeMillis();
+                Diag.lastTouchAt = lastTouchAt;
+                if (!sensorAlive) {
+                    sensorAlive = true;
+                    Diag.sensorAlive = true;
+                    Log.i(TAG, "SENSOR alive, touch gate armed");
+                }
             }
             return false;
         });
@@ -164,6 +179,7 @@ public class EndAccessibilityService extends AccessibilityService {
     }
 
     private boolean touchedWithin(long window, long now) {
+        if (!sensorAlive) return true;
         return now - lastTouchAt <= window;
     }
 
@@ -185,7 +201,23 @@ public class EndAccessibilityService extends AccessibilityService {
             return;
         }
 
-        if (!pkg.equals(foregroundPackage) || pkg.equals(getPackageName())) return;
+        if (pkg.equals(getPackageName())) return;
+
+        if (!pkg.equals(foregroundPackage)) {
+            // A keyboard or a system dialog may have taken the last window
+            // state change. If a feed app is producing events, ask Android
+            // which window is actually active and correct ourselves.
+            if (isFeedPackage(pkg) && now - lastResolveAt > 1000L) {
+                lastResolveAt = now;
+                String active = activeWindowPackage();
+                if (pkg.equals(active)) {
+                    Log.i(TAG, "FOREGROUND corrected to " + pkg);
+                    onForegroundChanged(pkg, now);
+                }
+            }
+            if (!pkg.equals(foregroundPackage)) return;
+        }
+
         if (activeKey == null) {
             if (Feeds.isBrowser(pkg) && type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
                 pollBrowserHost(pkg, now);
@@ -206,6 +238,8 @@ public class EndAccessibilityService extends AccessibilityService {
         }
 
         if (type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
+            Diag.scrollEvents++;
+            Diag.lastFeedEventAt = now;
             if (!touchedWithin(TOUCH_GATE_SCROLL_MS, now)) return;
             expireStaleProgress(state, now);
             addProgress(state, state.measureScroll(event, screenHeight, now), now);
@@ -217,6 +251,8 @@ public class EndAccessibilityService extends AccessibilityService {
             if (!touchedWithin(TOUCH_GATE_BURST_MS, now)) return;
             float contribution = state.measureContentBurst(now);
             if (contribution > 0f) {
+                Diag.burstCounts++;
+                Diag.lastFeedEventAt = now;
                 expireStaleProgress(state, now);
                 addProgress(state, contribution, now);
             }
@@ -228,6 +264,7 @@ public class EndAccessibilityService extends AccessibilityService {
 
         state.progress += contribution;
         state.lastActivityAt = now;
+        Diag.lastProgress = state.progress;
 
         Log.i(TAG, "PROGRESS key=" + state.key
                 + " +" + contribution
@@ -248,8 +285,13 @@ public class EndAccessibilityService extends AccessibilityService {
             return;
         }
 
+        // Keyboards, permission dialogs and edge panels announce a window
+        // state change too, but the app underneath is still the foreground.
+        if (isTransientWindow(pkg)) return;
+
         boolean changed = !pkg.equals(foregroundPackage);
         foregroundPackage = pkg;
+        Diag.foreground = pkg;
 
         if (changed) {
             activeHost = null;
@@ -260,6 +302,34 @@ public class EndAccessibilityService extends AccessibilityService {
             pollBrowserHost(pkg, now);
         } else {
             recomputeActiveKey(now);
+        }
+    }
+
+    private boolean isFeedPackage(String pkg) {
+        return config.isProtectedApp(pkg) || Feeds.isBrowser(pkg);
+    }
+
+    private static boolean isTransientWindow(String pkg) {
+        if (pkg == null) return true;
+        if (pkg.equals("android")) return true;
+        if (pkg.contains("inputmethod") || pkg.contains("keyboard")
+                || pkg.contains("honeyboard") || pkg.contains("swiftkey")) return true;
+        if (pkg.contains("permissioncontroller")) return true;
+        if (pkg.contains("cocktailbar")) return true;
+        return false;
+    }
+
+    /** Package of the window that actually has focus, or null if unknown. */
+    private String activeWindowPackage() {
+        AccessibilityNodeInfo root = null;
+        try {
+            root = getRootInActiveWindow();
+            if (root == null || root.getPackageName() == null) return null;
+            return root.getPackageName().toString();
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (root != null) root.recycle();
         }
     }
 
@@ -322,6 +392,8 @@ public class EndAccessibilityService extends AccessibilityService {
             FeedState state = stateFor(activeKey);
             state.onEntered(now);
             expireStaleProgress(state, now);
+            Diag.lastFeed = activeKey;
+            Diag.lastProgress = state.progress;
             Log.i(TAG, "FEED key=" + activeKey
                     + " progress=" + state.progress
                     + " locked=" + state.isLocked(now));
@@ -439,6 +511,7 @@ public class EndAccessibilityService extends AccessibilityService {
         try {
             windowManager.addView(root, lp);
             wall = root;
+            Diag.wallUp = true;
             Log.i(TAG, "WALL UP key=" + key);
             handler.post(tick);
         } catch (Exception e) {
@@ -526,6 +599,7 @@ public class EndAccessibilityService extends AccessibilityService {
         wallHeadline = null;
         wallCountdown = null;
         wallKey = null;
+        Diag.wallUp = false;
     }
 
     private LinearLayout.LayoutParams wrap() {
@@ -572,6 +646,7 @@ public class EndAccessibilityService extends AccessibilityService {
     }
 
     private void teardown() {
+        Diag.connected = false;
         handler.removeCallbacksAndMessages(null);
         hideWall();
 
