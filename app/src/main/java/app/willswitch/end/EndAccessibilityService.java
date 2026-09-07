@@ -117,7 +117,7 @@ public class EndAccessibilityService extends AccessibilityService {
         EndPrefs.prefs(this).registerOnSharedPreferenceChangeListener(configListener);
 
         Diag.connected = true;
-        Log.i(TAG, "SERVICE CONNECTED limit=" + config.screens
+        log("SERVICE CONNECTED limit=" + config.screens
                 + " cooldown=" + config.cooldownMinutes
                 + " apps=" + config.apps.size());
     }
@@ -153,7 +153,7 @@ public class EndAccessibilityService extends AccessibilityService {
                 if (!sensorAlive) {
                     sensorAlive = true;
                     Diag.sensorAlive = true;
-                    Log.i(TAG, "SENSOR alive, touch gate armed");
+                    log("SENSOR alive, touch gate armed");
                 }
             }
             return false;
@@ -173,7 +173,7 @@ public class EndAccessibilityService extends AccessibilityService {
             windowManager.addView(view, lp);
             sensor = view;
         } catch (Exception e) {
-            Log.w(TAG, "SENSOR failed, counting without touch gate", e);
+            log("SENSOR failed, counting without touch gate", e);
             lastTouchAt = Long.MAX_VALUE / 2;
         }
     }
@@ -197,6 +197,16 @@ public class EndAccessibilityService extends AccessibilityService {
         long now = System.currentTimeMillis();
 
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            if (pkg.equals(getPackageName())) {
+                // The wall and the sensor are windows of this package too.
+                // Only the settings screen counts as END coming to the front;
+                // anything else from our own package is us, not the user.
+                CharSequence cls = event.getClassName();
+                boolean settingsScreen = cls != null
+                        && cls.toString().equals(MainActivity.class.getName());
+                if (settingsScreen) onForegroundChanged(pkg, now);
+                return;
+            }
             onForegroundChanged(pkg, now);
             return;
         }
@@ -211,7 +221,7 @@ public class EndAccessibilityService extends AccessibilityService {
                 lastResolveAt = now;
                 String active = activeWindowPackage();
                 if (pkg.equals(active)) {
-                    Log.i(TAG, "FOREGROUND corrected to " + pkg);
+                    log("FOREGROUND corrected to " + pkg);
                     onForegroundChanged(pkg, now);
                 }
             }
@@ -266,7 +276,7 @@ public class EndAccessibilityService extends AccessibilityService {
         state.lastActivityAt = now;
         Diag.lastProgress = state.progress;
 
-        Log.i(TAG, "PROGRESS key=" + state.key
+        log("PROGRESS key=" + state.key
                 + " +" + contribution
                 + " => " + state.progress
                 + " / " + config.screens);
@@ -277,13 +287,10 @@ public class EndAccessibilityService extends AccessibilityService {
     // ------------------------------------------------------------- foreground
 
     private void onForegroundChanged(String pkg, long now) {
-        if (Feeds.SYSTEM_UI.equals(pkg)) {
-            // Shade, recents or a system dialog on top. Drop the wall so it
-            // can never sit over system UI; the next event from the locked
-            // feed raises it again.
-            hideWall();
-            return;
-        }
+        // The shade and system dialogs draw above the wall on their own, and
+        // recents is the launcher, which is a real foreground change. So
+        // System UI is never a reason to touch the wall.
+        if (Feeds.SYSTEM_UI.equals(pkg)) return;
 
         // Keyboards, permission dialogs and edge panels announce a window
         // state change too, but the app underneath is still the foreground.
@@ -362,7 +369,7 @@ public class EndAccessibilityService extends AccessibilityService {
                 }
             }
         } catch (Exception e) {
-            Log.w(TAG, "URL read failed pkg=" + pkg, e);
+            log("URL read failed pkg=" + pkg, e);
         } finally {
             if (root != null) root.recycle();
         }
@@ -394,12 +401,15 @@ public class EndAccessibilityService extends AccessibilityService {
             expireStaleProgress(state, now);
             Diag.lastFeed = activeKey;
             Diag.lastProgress = state.progress;
-            Log.i(TAG, "FEED key=" + activeKey
+            log("FEED key=" + activeKey
                     + " progress=" + state.progress
                     + " locked=" + state.isLocked(now));
         }
 
-        if (activeKey == null || !activeKey.equals(wallKey)) hideWall();
+        if (activeKey == null || !activeKey.equals(wallKey)) {
+            if (wallKey != null) log("WALL DOWN because feed is now " + activeKey);
+            hideWall();
+        }
         if (activeKey != null && stateFor(activeKey).isLocked(now)) showWall(activeKey);
     }
 
@@ -426,7 +436,7 @@ public class EndAccessibilityService extends AccessibilityService {
         state.lastActivityAt = now;
         EndPrefs.setLockedUntil(this, state.key, state.lockedUntil);
 
-        Log.w(TAG, "END REACHED key=" + state.key);
+        log("END REACHED key=" + state.key);
         showWall(state.key);
     }
 
@@ -435,7 +445,7 @@ public class EndAccessibilityService extends AccessibilityService {
         if (state != null) state.clearLock();
         EndPrefs.clearLock(this, key);
         hideWall();
-        Log.i(TAG, "END CLEARED key=" + key);
+        log("END CLEARED key=" + key);
     }
 
     // ------------------------------------------------------------------- wall
@@ -512,10 +522,10 @@ public class EndAccessibilityService extends AccessibilityService {
             windowManager.addView(root, lp);
             wall = root;
             Diag.wallUp = true;
-            Log.i(TAG, "WALL UP key=" + key);
+            log("WALL UP key=" + key);
             handler.post(tick);
         } catch (Exception e) {
-            Log.e(TAG, "WALL FAILED key=" + key, e);
+            log("WALL FAILED key=" + key, e);
             wall = null;
             wallColumn = null;
             wallKey = null;
@@ -571,7 +581,7 @@ public class EndAccessibilityService extends AccessibilityService {
         }
 
         private void leave() {
-            Log.i(TAG, "WALL leave key=" + wallKey + " browser=" + inBrowser);
+            log("WALL leave key=" + wallKey + " browser=" + inBrowser);
             performGlobalAction(inBrowser ? GLOBAL_ACTION_BACK : GLOBAL_ACTION_HOME);
         }
     }
@@ -588,7 +598,6 @@ public class EndAccessibilityService extends AccessibilityService {
         if (wall != null && windowManager != null) {
             try {
                 windowManager.removeView(wall);
-                Log.i(TAG, "WALL DOWN key=" + wallKey);
             } catch (Exception ignored) {
                 // The window was already gone.
             }
@@ -624,6 +633,16 @@ public class EndAccessibilityService extends AccessibilityService {
 
     private int dp(int value) {
         return Math.round(value * density);
+    }
+
+    private static void log(String message) {
+        Log.i(TAG, message);
+        Diag.log(message);
+    }
+
+    private static void log(String message, Throwable error) {
+        Log.w(TAG, message, error);
+        Diag.log(message + ": " + error);
     }
 
     // --------------------------------------------------------------- teardown

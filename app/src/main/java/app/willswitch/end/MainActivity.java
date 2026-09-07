@@ -44,6 +44,9 @@ public class MainActivity extends Activity {
     private Button doneButton;
     private TextView guide;
     private TextView diagnostics;
+    private TextView logToggle;
+    private TextView logView;
+    private boolean logOpen;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable refresh = new Runnable() {
         @Override public void run() {
@@ -153,7 +156,27 @@ public class MainActivity extends Activity {
         privacy.setTextColor(Color.rgb(160,160,160));
         root.addView(privacy);
 
-        setContentView(scroll);
+        LinearLayout shell = new LinearLayout(this);
+        shell.setOrientation(LinearLayout.VERTICAL);
+        shell.setBackgroundColor(BG);
+        shell.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        doneButton = new Button(this);
+        doneButton.setAllCaps(false);
+        doneButton.setText("Done");
+        doneButton.setTextColor(BG);
+        doneButton.setTextSize(15);
+        doneButton.setTypeface(Typeface.DEFAULT_BOLD);
+        doneButton.setBackgroundColor(ACID);
+        doneButton.setOnClickListener(v -> {
+            moveTaskToBack(true);
+            finishAndRemoveTask();
+        });
+        shell.addView(doneButton, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
+
+        setContentView(shell);
         updateServiceStatus();
     }
 
@@ -230,18 +253,25 @@ public class MainActivity extends Activity {
         dLp.topMargin = dp(14);
         card.addView(diagnostics, dLp);
 
-        doneButton = new Button(this);
-        doneButton.setAllCaps(false);
-        doneButton.setText("Done. Close END");
-        doneButton.setTextColor(TEXT);
-        doneButton.setTextSize(13);
-        doneButton.setTypeface(Typeface.DEFAULT_BOLD);
-        doneButton.setBackgroundColor(LINE);
-        doneButton.setOnClickListener(v -> finishAndRemoveTask());
-        LinearLayout.LayoutParams doneLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
-        doneLp.topMargin = dp(14);
-        card.addView(doneButton, doneLp);
+        logToggle = new TextView(this);
+        logToggle.setTextColor(ACID);
+        logToggle.setTextSize(12);
+        logToggle.setTypeface(Typeface.DEFAULT_BOLD);
+        logToggle.setText("Show log");
+        logToggle.setPadding(0, dp(12), 0, dp(6));
+        logToggle.setOnClickListener(v -> {
+            logOpen = !logOpen;
+            logToggle.setText(logOpen ? "Hide log" : "Show log");
+            updateServiceStatus();
+        });
+        card.addView(logToggle);
+
+        logView = new TextView(this);
+        logView.setTextColor(Color.rgb(170, 170, 170));
+        logView.setTextSize(10);
+        logView.setTypeface(Typeface.MONOSPACE);
+        logView.setLineSpacing(0, 1.2f);
+        card.addView(logView);
 
         return card;
     }
@@ -420,7 +450,10 @@ public class MainActivity extends Activity {
         guide.setVisibility(enabled ? View.GONE : View.VISIBLE);
         doneButton.setVisibility(enabled ? View.VISIBLE : View.GONE);
         diagnostics.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        logToggle.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        logView.setVisibility(enabled && logOpen ? View.VISIBLE : View.GONE);
         if (enabled) diagnostics.setText(diagnosticsText());
+        if (enabled && logOpen) logView.setText(Diag.logText());
     }
 
     /**

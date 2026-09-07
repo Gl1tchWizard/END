@@ -1,0 +1,4 @@
+- Fix: the wall dropped itself the moment it appeared, because END treated its own overlay window as the user opening END. It then flickered and let scrolling through.
+- Fix: System UI window changes no longer touch the wall.
+- Setup: Done button pinned to the bottom of the screen.
+- Setup: in-app log under the status card, the same lines as Logcat.
