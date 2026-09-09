@@ -487,7 +487,7 @@ public class MainActivity extends Activity {
                     .append(Diag.burstCounts).append(" burst").append('\n');
             out.append("last      ").append(Diag.lastFeedEventAt == 0 ? "never" : ago(now - Diag.lastFeedEventAt)).append('\n');
         }
-        out.append("wall      ").append(Diag.wallUp ? "up" : "down");
+        out.append("end       ").append(Diag.endMode);
         return out.toString();
     }
 

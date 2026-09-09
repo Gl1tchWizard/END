@@ -42,8 +42,15 @@ final class FeedState {
     long lockedUntil;
     long lastActivityAt;
 
-    /** The scrollable that carries this feed, learned from scroll events. */
+    /**
+     * The scrollable that carries this feed, learned from scroll events.
+     * Class name and item count are the cheap signature that comes with every
+     * event; the view id is verified against the node itself only rarely,
+     * because fetching a node is a round trip into the app's UI thread.
+     */
     String feedViewId;
+    String feedClassName;
+    int feedItemCount = -1;
     Rect feedBounds;
 
     /**

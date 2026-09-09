@@ -1,0 +1,3 @@
+- Smoothness: END no longer fetches anything from the app while you scroll. Every scroll frame used to cost a round trip into the app's UI thread.
+- The footer lands on the real bottom edge: exact navigation inset on gesture navigation, and the feed's own bounds also for feeds that fall back to the fence.
+- Status card shows which end a feed got: curtain in pixels, curtain in items, or fence.

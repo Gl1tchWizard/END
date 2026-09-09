@@ -23,6 +23,7 @@ final class Diag {
     static volatile int scrollEvents;
     static volatile int burstCounts;
     static volatile boolean wallUp;
+    static volatile String endMode = "down";
 
     private static final int LOG_LINES = 80;
     private static final ArrayDeque<String> LOG = new ArrayDeque<>();

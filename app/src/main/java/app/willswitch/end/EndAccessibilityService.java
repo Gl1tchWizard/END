@@ -104,7 +104,6 @@ public class EndAccessibilityService extends AccessibilityService {
             }
 
             if (wallCountdown != null) wallCountdown.setText(formatRemaining(remaining));
-            if (curtain != null && state != null) relayoutCurtain(state);
             handler.postDelayed(this, 1000);
         }
     };
@@ -288,17 +287,27 @@ public class EndAccessibilityService extends AccessibilityService {
 
     /**
      * Remember which scrollable carries the feed and where it sits on screen.
-     * The fence is drawn over exactly that node, so its footer lands on the
-     * real bottom edge of the page and nothing shows underneath.
+     * This is the only place that fetches nodes while the user scrolls, and it
+     * runs at most once every two seconds: every node fetch is a synchronous
+     * round trip into the app's own UI thread, and doing that per scroll
+     * frame is exactly what makes an app feel less smooth.
      */
     private void learnFeedNode(FeedState state, AccessibilityEvent event, long now) {
-        if (now - lastLearnAt < 600L) return;
+        boolean firstTime = state.feedBounds == null;
+        if (!firstTime && now - lastLearnAt < 2000L) return;
         lastLearnAt = now;
 
         AccessibilityNodeInfo source = null;
+        AccessibilityNodeInfo root = null;
         try {
             source = event.getSource();
-            if (source == null) return;
+            if (source == null) {
+                // Some apps send scroll events without a source. Take the
+                // largest scrollable on screen instead.
+                root = getRootInActiveWindow();
+                source = largestScrollable(root);
+                if (source == null) return;
+            }
 
             String id = source.getViewIdResourceName();
             Rect bounds = new Rect();
@@ -315,14 +324,19 @@ public class EndAccessibilityService extends AccessibilityService {
                     || (id != null && !id.equals(state.feedViewId));
             state.feedViewId = id;
             state.feedBounds = bounds;
+            CharSequence cls = event.getClassName();
+            state.feedClassName = cls == null ? null : cls.toString();
+            state.feedItemCount = event.getItemCount();
             if (changed) {
-                log("FEED NODE " + id + " " + bounds.toShortString());
+                log("FEED NODE " + id + " " + bounds.toShortString()
+                        + " class=" + state.feedClassName + " items=" + state.feedItemCount);
                 if (curtain != null && state.key.equals(wallKey)) relayoutCurtain(state);
             }
         } catch (Exception ignored) {
             // The node went away.
         } finally {
-            if (source != null) source.recycle();
+            if (source != null && source != root) source.recycle();
+            if (root != null) root.recycle();
         }
     }
 
@@ -351,16 +365,24 @@ public class EndAccessibilityService extends AccessibilityService {
 
     /**
      * Events from a different list in the same app say nothing about the
-     * feed. True when the event comes from the feed's own node, or when no
-     * node id is known to compare against.
+     * feed. Decided from what the event itself carries, class name and item
+     * count, so that no node is fetched on the scroll path. A chip bar with
+     * twelve items is not the feed with four hundred.
      */
     private boolean fromFeedNode(FeedState state, AccessibilityEvent event) {
-        if (state.feedViewId == null) return true;
-        AccessibilityNodeInfo source = event.getSource();
-        if (source == null) return true;
-        String id = source.getViewIdResourceName();
-        source.recycle();
-        return id == null || id.equals(state.feedViewId);
+        if (state.feedClassName == null) return true;
+
+        CharSequence cls = event.getClassName();
+        if (cls != null && !cls.toString().equals(state.feedClassName)) return false;
+
+        int items = event.getItemCount();
+        if (items >= 0 && state.feedItemCount >= 0) {
+            int big = Math.max(items, state.feedItemCount);
+            int small = Math.min(items, state.feedItemCount);
+            // Feeds grow while you scroll; a different list is a different order of magnitude.
+            if (small > 0 && big > small * 4 && big - small > 20) return false;
+        }
+        return true;
     }
 
     private long lastPullAt;
@@ -609,7 +631,8 @@ public class EndAccessibilityService extends AccessibilityService {
      */
     private void showWall(String key) {
         FeedState state = stateFor(key);
-        if (state.positionKnown && state.feedBounds != null) {
+        boolean unitUsable = state.positionInPixels || state.profile == Feeds.PROFILE_ITEM;
+        if (state.positionKnown && unitUsable && state.feedBounds != null) {
             showCurtain(state);
         } else {
             showFence(key);
@@ -717,6 +740,7 @@ public class EndAccessibilityService extends AccessibilityService {
             curtain = root;
             curtainParams = lp;
             Diag.wallUp = true;
+            Diag.endMode = "curtain (" + (state.positionInPixels ? "px" : "items") + ")";
             updateCurtain(state);
             log("CURTAIN UP key=" + state.key + " area=" + area.toShortString()
                     + " unit=" + (state.positionInPixels ? "px" : "items"));
@@ -800,7 +824,7 @@ public class EndAccessibilityService extends AccessibilityService {
      */
     private int bottomBarTop(FeedState state, int feedBottom) {
         long now = System.currentTimeMillis();
-        if (now - lastBarMeasureAt < 800L) return lastBarTop;
+        if (now - lastBarMeasureAt < 3000L) return lastBarTop;
         lastBarMeasureAt = now;
         lastBarTop = -1;
 
@@ -934,13 +958,9 @@ public class EndAccessibilityService extends AccessibilityService {
         Rect feed = state != null ? state.feedBounds : null;
 
         if (feed != null && feed.height() >= dp(120)) {
-            // The fence is exactly the feed's own list. Its footer lands on
-            // the real bottom edge of the page.
-            top = Math.max(statusBarHeight(), feed.top);
-            int bottom = Math.min(feed.bottom, screenBottom);
-            boolean fullBleed = bottom >= screenBottom - dp(8) && !Feeds.isBrowser(Feeds.packageOfKey(key));
-            if (fullBleed) bottom -= dp(56);   // an app bar drawn over the feed
-            height = Math.max(dp(120), bottom - top);
+            Rect area = curtainArea(state);
+            top = area.top;
+            height = area.height();
         } else {
             top = statusBarHeight() + dp(TOP_STRIP_DP);
             int bottom = navigationBarHeight() + dp(BOTTOM_STRIP_DP);
@@ -965,6 +985,7 @@ public class EndAccessibilityService extends AccessibilityService {
             wall = root;
             wallParams = lp;
             Diag.wallUp = true;
+            Diag.endMode = "fence (no position)";
             log("FENCE UP (no position from this feed) key=" + key + " band=" + top + ".." + (top + height));
             handler.post(tick);
         } catch (Exception e) {
@@ -977,7 +998,7 @@ public class EndAccessibilityService extends AccessibilityService {
     }
 
     private static final int TOP_STRIP_DP = 64;
-    private static final int BOTTOM_STRIP_DP = 72;
+    private static final int BOTTOM_STRIP_DP = 60;
     private static final long TAP_MS = 60L;
     private static final long PASS_THROUGH_SETTLE_MS = 40L;
     private static final long PASS_THROUGH_TIMEOUT_MS = 450L;
@@ -1334,14 +1355,36 @@ public class EndAccessibilityService extends AccessibilityService {
         wallCountdown = null;
         wallKey = null;
         Diag.wallUp = false;
+        Diag.endMode = "down";
     }
 
     private int statusBarHeight() {
+        if (Build.VERSION.SDK_INT >= 30 && windowManager != null) {
+            try {
+                android.view.WindowInsets insets = windowManager.getCurrentWindowMetrics().getWindowInsets();
+                return insets.getInsets(android.view.WindowInsets.Type.statusBars()).top;
+            } catch (Exception ignored) {
+                // Fall through to the resource.
+            }
+        }
         int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
         return id > 0 ? getResources().getDimensionPixelSize(id) : dp(28);
     }
 
+    /**
+     * Height of the system navigation area at the bottom. The dimen resource
+     * reports the three-button height even on gesture navigation, which left
+     * a strip of content visible under the footer; the window metrics do not.
+     */
     private int navigationBarHeight() {
+        if (Build.VERSION.SDK_INT >= 30 && windowManager != null) {
+            try {
+                android.view.WindowInsets insets = windowManager.getCurrentWindowMetrics().getWindowInsets();
+                return insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom;
+            } catch (Exception ignored) {
+                // Fall through to the resource.
+            }
+        }
         int id = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
         return id > 0 ? getResources().getDimensionPixelSize(id) : dp(48);
     }
