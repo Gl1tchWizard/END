@@ -55,12 +55,21 @@ either. There is no alternative that would achieve the same result.
   browser feeds, keeping only the host.
 
 **What it does not do.** END does not read page text, messages, images, form
-fields or passwords. It takes no screenshots. It performs no gestures, no
-clicks and no automation: nothing is injected, nothing is captured, no action
-is executed on the user's behalf. This matters for the 30 October 2025 policy
-update, which prohibits any use of the API that lets an app autonomously
-initiate, plan and execute actions. END only reads events and draws its own
-overlay.
+fields or passwords. It takes no screenshots. It never captures or intercepts
+the user's touches; its overlay is untouchable. It performs no automation and
+executes nothing on the user's behalf. This matters for the 30 October 2025
+policy update, which prohibits any use of the API that lets an app
+autonomously initiate, plan and execute actions.
+
+**The one gesture END dispatches.** When the user overscrolls a feed past its
+end and lets go, END returns the feed to the end: first with the node's own
+scroll-back action, and only if the app refuses that, with a slow drag of the
+overshoot distance dispatched through `dispatchGesture`. This is overscroll
+correction, the equivalent of a web page snapping back, triggered solely by
+the user's own overscroll a moment earlier, limited to three attempts, and it
+never initiates, plans or executes anything else. For feeds that report no
+position, a tap the user makes on the fence is passed through as a tap at the
+same spot.
 
 **Prominent disclosure.** Shown on first launch, before anything is enabled,
 as a dialog the user must actively accept. It is inside the app, appears in

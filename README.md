@@ -37,8 +37,14 @@ grows, and on the way back it settles again. A small lead is added while
 moving forward so event latency never shows a strip of new content.
 
 Because the window is untouchable, scrolling, tapping, long pressing and the
-app's own bars all work natively. Far past the end there is only black; as a
-courtesy END asks the feed to scroll back a page so you do not have to.
+app's own bars all work natively.
+
+Past the end the feed springs back, like a web page after an overscroll. When
+the feed comes to rest past the end, END first asks the feed's own node to
+scroll back; if the app refuses, END drags the feed back by the overshoot
+distance with a slow injected swipe that ends at zero velocity, so it cannot
+fling. That drag is the only gesture END ever performs, it happens only as the
+direct result of the user's own overscroll, and it stops after three tries.
 
 Feeds that report no position at all fall back to a fence: a touch-owning
 overlay that steps a page on a swipe and hands taps through. The log says

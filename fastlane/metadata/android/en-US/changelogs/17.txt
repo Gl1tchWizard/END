@@ -1,0 +1,2 @@
+- Past the end, the feed springs back, like a web page after an overscroll. No more black void.
+- While the feed moves, the curtain covers it down to its real bottom, so nothing peeks out where the app's bar used to be.

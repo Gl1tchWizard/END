@@ -356,11 +356,107 @@ public class EndAccessibilityService extends AccessibilityService {
             return;
         }
 
+        // While the feed moves, its app bar may hide and expose the strip the
+        // window was trimmed to. Cover the feed down to its real bottom until
+        // things settle.
+        if (curtainTrimmed) relayoutCurtain(state, false);
+
         updateCurtain(state);
 
-        // Deep past the end there is only black. Best effort: bring the feed
-        // back so the user does not have to scroll all the way up again.
-        if (overshootPixels(state) > curtainHeight * 1.2f) pullBackToEnd(state, now);
+        handler.removeCallbacks(settle);
+        handler.postDelayed(settle, SETTLE_MS);
+    }
+
+    private static final long SETTLE_MS = 260L;
+    private static final long BOUNCE_MIN_GAP_MS = 700L;
+    private static final int SPRING_MAX_ATTEMPTS = 3;
+    private long lastBounceAt;
+    private int springAttempts;
+
+    /**
+     * Runs when the feed has stopped moving. Two jobs: put the window back
+     * above the app's bar if it has reappeared, and spring the feed back if
+     * it came to rest past the end, the way a web page snaps back after an
+     * overscroll.
+     */
+    private final Runnable settle = new Runnable() {
+        @Override public void run() {
+            FeedState state = wallKey == null ? null : feeds.get(wallKey);
+            if (state == null || curtain == null) return;
+
+            long now = System.currentTimeMillis();
+            float over = overshootPixels(state);
+
+            if (over > dp(6)) {
+                if (springAttempts >= SPRING_MAX_ATTEMPTS) {
+                    log("SPRING gave up at overshoot " + Math.round(over) + "px");
+                    return;
+                }
+                if (now - lastBounceAt >= BOUNCE_MIN_GAP_MS) {
+                    lastBounceAt = now;
+                    springAttempts++;
+                    springBack(state, over);
+                }
+                // Settle again after the spring has had its effect.
+                handler.postDelayed(this, 450L);
+                return;
+            }
+
+            springAttempts = 0;
+            state.lastMoveForward = false;
+            updateCurtain(state);
+            relayoutCurtain(state, true);
+        }
+    };
+
+    /**
+     * Bring a feed that rests past its end back to the end. First by asking
+     * the feed's own scrollable node, which is exact and free; if the app
+     * refuses, with a slow injected drag of the overshoot distance, ending at
+     * zero velocity so it cannot fling.
+     */
+    private void springBack(FeedState state, float overshoot) {
+        if (pullBackToEnd(state, System.currentTimeMillis())) return;
+        if (curtainParams == null) return;
+
+        float distance = Math.min(overshoot + dp(12), curtainHeight * 0.6f);
+        float x = curtainParams.x + curtainParams.width / 2f;
+        float y0 = curtainParams.y + curtainHeight * 0.25f;
+        float y1 = Math.min(realScreenHeight() - dp(24), y0 + distance);
+        long duration = Math.max(140L, Math.min(360L, (long) (distance / 2.2f)));
+
+        try {
+            Path drag = new Path();
+            drag.moveTo(x, y0);
+            drag.lineTo(x, y1);
+            GestureDescription.StrokeDescription main =
+                    new GestureDescription.StrokeDescription(drag, 0, duration, true);
+
+            // The tail: a few pixels over a long time, so the release velocity
+            // is nothing and the feed does not fling.
+            Path tail = new Path();
+            tail.moveTo(x, y1);
+            tail.lineTo(x, y1 + 2f);
+            final GestureDescription.StrokeDescription end =
+                    main.continueStroke(tail, 0, 140L, false);
+
+            GestureDescription first = new GestureDescription.Builder().addStroke(main).build();
+            boolean accepted = dispatchGesture(first, new GestureResultCallback() {
+                @Override public void onCompleted(GestureDescription d) {
+                    try {
+                        dispatchGesture(new GestureDescription.Builder().addStroke(end).build(), null, handler);
+                    } catch (Exception e) {
+                        log("SPRING tail failed", e);
+                    }
+                }
+                @Override public void onCancelled(GestureDescription d) {
+                    log("SPRING cancelled, probably a touch");
+                }
+            }, handler);
+            log("SPRING back " + Math.round(distance) + "px over " + duration + "ms accepted=" + accepted);
+        } catch (Exception e) {
+            log("SPRING failed", e);
+        }
     }
 
     /**
@@ -387,9 +483,9 @@ public class EndAccessibilityService extends AccessibilityService {
 
     private long lastPullAt;
 
-    /** The feed slipped past its end. Bring it back, once per half second. */
-    private void pullBackToEnd(FeedState state, long now) {
-        if (now - lastPullAt < 500L) return;
+    /** Ask the feed's own node to scroll back. True if the app accepted. */
+    private boolean pullBackToEnd(FeedState state, long now) {
+        if (now - lastPullAt < 500L) return false;
         lastPullAt = now;
 
         AccessibilityNodeInfo root = null;
@@ -397,7 +493,7 @@ public class EndAccessibilityService extends AccessibilityService {
         try {
             root = getRootInActiveWindow();
             node = feedNode(state, root, -1f, -1f);
-            if (node == null) return;
+            if (node == null) return false;
 
             boolean done = false;
             if (state.profile == Feeds.PROFILE_ITEM && !state.positionInPixels && Build.VERSION.SDK_INT >= 23) {
@@ -409,8 +505,10 @@ public class EndAccessibilityService extends AccessibilityService {
             }
             if (!done) done = node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
             log("PULL back to end ok=" + done + " overshoot=" + state.overshoot());
+            return done;
         } catch (Exception e) {
             log("PULL failed", e);
+            return false;
         } finally {
             if (node != null && node != root) node.recycle();
             if (root != null) root.recycle();
@@ -664,7 +762,7 @@ public class EndAccessibilityService extends AccessibilityService {
         hideWall();
         wallKey = state.key;
 
-        Rect area = curtainArea(state);
+        Rect area = curtainArea(state, true);
         curtainHeight = area.height();
 
         FrameLayout root = new FrameLayout(this);
@@ -775,8 +873,12 @@ public class EndAccessibilityService extends AccessibilityService {
     }
 
     private void relayoutCurtain(FeedState state) {
+        relayoutCurtain(state, curtainTrimmed);
+    }
+
+    private void relayoutCurtain(FeedState state, boolean trimToBar) {
         if (curtain == null || curtainParams == null) return;
-        Rect area = curtainArea(state);
+        Rect area = curtainArea(state, trimToBar);
         if (area.height() == curtainParams.height && area.top == curtainParams.y
                 && area.width() == curtainParams.width && area.left == curtainParams.x) return;
         curtainParams.x = area.left;
@@ -797,7 +899,7 @@ public class EndAccessibilityService extends AccessibilityService {
      * The screen area the feed occupies: its own bounds, trimmed to the
      * screen, and trimmed above an app bar that sits over its bottom edge.
      */
-    private Rect curtainArea(FeedState state) {
+    private Rect curtainArea(FeedState state, boolean trimToBar) {
         Rect feed = state.feedBounds;
         int screenBottom = realScreenHeight() - navigationBarHeight();
         int top = Math.max(statusBarHeight(), feed.top);
@@ -805,8 +907,14 @@ public class EndAccessibilityService extends AccessibilityService {
         int left = Math.max(0, feed.left);
         int right = Math.min(screenWidth, feed.right);
 
-        int barTop = bottomBarTop(state, bottom);
-        if (barTop > top + dp(120)) bottom = Math.min(bottom, barTop);
+        curtainTrimmed = false;
+        if (trimToBar) {
+            int barTop = bottomBarTop(state, bottom, true);
+            if (barTop > top + dp(120) && barTop < bottom) {
+                bottom = barTop;
+                curtainTrimmed = true;
+            }
+        }
 
         if (bottom - top < dp(120)) bottom = top + dp(120);
         Rect area = new Rect();
@@ -822,9 +930,9 @@ public class EndAccessibilityService extends AccessibilityService {
      * for a wide, shallow, non-scrolling node with a few children sitting on
      * the feed's bottom edge, which is what a bottom navigation bar is.
      */
-    private int bottomBarTop(FeedState state, int feedBottom) {
+    private int bottomBarTop(FeedState state, int feedBottom, boolean force) {
         long now = System.currentTimeMillis();
-        if (now - lastBarMeasureAt < 3000L) return lastBarTop;
+        if (!force && now - lastBarMeasureAt < 3000L) return lastBarTop;
         lastBarMeasureAt = now;
         lastBarTop = -1;
 
@@ -958,7 +1066,7 @@ public class EndAccessibilityService extends AccessibilityService {
         Rect feed = state != null ? state.feedBounds : null;
 
         if (feed != null && feed.height() >= dp(120)) {
-            Rect area = curtainArea(state);
+            Rect area = curtainArea(state, true);
             top = area.top;
             height = area.height();
         } else {
@@ -1005,6 +1113,7 @@ public class EndAccessibilityService extends AccessibilityService {
 
     private WindowManager.LayoutParams wallParams;
     private boolean passingThrough;
+    private boolean curtainTrimmed;
     private int stepsBack;
     private final Runnable restoreTouchable = this::restoreTouchable;
 
@@ -1327,6 +1436,7 @@ public class EndAccessibilityService extends AccessibilityService {
 
     private void hideWall() {
         handler.removeCallbacks(tick);
+        handler.removeCallbacks(settle);
         handler.removeCallbacks(restoreTouchable);
         passingThrough = false;
 
