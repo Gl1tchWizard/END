@@ -1,0 +1,1 @@
+- The end is a curtain that follows the feed. The END footer sits on the bottom edge of the page; past it everything is black. Scrolling is fully native in both directions, END never touches your input.

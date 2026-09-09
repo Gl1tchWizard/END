@@ -12,44 +12,37 @@ used up, the page stops.
 One rule: after the chosen amount of feed, the scroll ends.
 
 - Default: 3 screens, then 20 minutes of no feed. Both adjustable.
-- The end is a fence, not a wall. A footer marks the end of the feed. The feed
-  stays visible, taps still reach the app, the app's own bars and Android's
-  navigation keep working, and a swipe down steps back a page through what
-  you already saw. Only going further is impossible.
-- Nothing else changes. Other apps, notifications, back, home, the shade: all
-  untouched.
+- The end is a curtain. An END footer sits on the bottom edge of the page and
+  everything past it is black. Scroll back and it is all still there; scroll
+  further and the page simply runs out, the way an ordinary web page does.
+- Nothing is intercepted. Every tap and every swipe goes to the app. END
+  never touches your input.
 - Feeds are separate. Ending Reddit does not end Instagram. Ending reddit.com
   in Brave does not end the Reddit app.
 
 Works on Android 9 and up.
 
-## How the fence works
+## How the curtain works
 
 END learns which scrollable node carries the feed from the feed's own scroll
-events, and where that node sits on screen. When the limit is reached, a
-transparent accessibility overlay is placed over exactly that node, with an
-opaque footer along its bottom edge. The footer therefore lands on the real
-bottom of the page; there is nothing under it.
+events, its bounds on screen, and its position: exact pixel deltas when the
+app reports them, its scroll offset otherwise, an item index as a last resort.
 
-At the end the fence holds:
-- a tap is handed to the app as a single tap at the same spot: the fence goes
-  untouchable for a moment, the tap is dispatched, the fence comes back;
-- a swipe up pulls the footer a little and lets it spring;
-- a swipe down performs one `ACTION_SCROLL_BACKWARD` on the feed node, and
-  then the fence goes away entirely.
+At the limit the end is pinned at the current position. A window that takes
+no touches is placed over the feed's own area. Inside it a sheet slides: an
+acid line, the END footer, and black below. At the end the footer sits on the
+bottom edge of the feed. Every scroll event moves the sheet by the same
+amount the content moved, so past the end the footer rises and the black
+grows, and on the way back it settles again. A small lead is added while
+moving forward so event latency never shows a strip of new content.
 
-Above the end there is no fence. Scrolling is native, in both directions, as
-smooth as it always was. The feed's own scroll events say where it stands
-relative to the pinned end; when it reaches the end again the fence comes
-back, and if it slipped past, END pulls it back once. That is the bottom of
-an ordinary web page: you can read everything you saw, you cannot go further.
+Because the window is untouchable, scrolling, tapping, long pressing and the
+app's own bars all work natively. Far past the end there is only black; as a
+courtesy END asks the feed to scroll back a page so you do not have to.
 
-For a feed that reports no position at all, the fence stays up and a swipe
-steps one page back or forward instead, never past the end.
-
-Nothing autonomous happens. Every action END performs is the user's own tap
-or swipe, at the moment they make it, plus the one pull-back when a fling
-crosses the end.
+Feeds that report no position at all fall back to a fence: a touch-owning
+overlay that steps a page on a swipe and hands taps through. The log says
+which of the two a feed got.
 
 ## Counting
 

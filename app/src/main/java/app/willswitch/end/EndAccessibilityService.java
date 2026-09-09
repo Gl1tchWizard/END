@@ -104,6 +104,7 @@ public class EndAccessibilityService extends AccessibilityService {
             }
 
             if (wallCountdown != null) wallCountdown.setText(formatRemaining(remaining));
+            if (curtain != null && state != null) relayoutCurtain(state);
             handler.postDelayed(this, 1000);
         }
     };
@@ -248,9 +249,9 @@ public class EndAccessibilityService extends AccessibilityService {
             if (type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
                 learnFeedNode(state, event, now);
                 onScrolledWhileEnded(state, event, now);
-            } else if (state.atEnd && wall == null) {
-                // Self healing: an ended feed is producing events and the
-                // fence is not up. Raise it.
+            } else if (wall == null && curtain == null) {
+                // Self healing: an ended feed is producing events and its end
+                // is not on screen. Raise it.
                 showWall(activeKey);
             }
             if (Feeds.isBrowser(pkg) && type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
@@ -263,6 +264,7 @@ public class EndAccessibilityService extends AccessibilityService {
             Diag.scrollEvents++;
             Diag.lastFeedEventAt = now;
             learnFeedNode(state, event, now);
+            if (fromFeedNode(state, event)) state.observePosition(event);
             if (!touchedWithin(TOUCH_GATE_SCROLL_MS, now)) return;
             expireStaleProgress(state, now);
             addProgress(state, state.measureScroll(event, screenHeight, now), now);
@@ -313,7 +315,10 @@ public class EndAccessibilityService extends AccessibilityService {
                     || (id != null && !id.equals(state.feedViewId));
             state.feedViewId = id;
             state.feedBounds = bounds;
-            if (changed) log("FEED NODE " + id + " " + bounds.toShortString());
+            if (changed) {
+                log("FEED NODE " + id + " " + bounds.toShortString());
+                if (curtain != null && state.key.equals(wallKey)) relayoutCurtain(state);
+            }
         } catch (Exception ignored) {
             // The node went away.
         } finally {
@@ -322,44 +327,40 @@ public class EndAccessibilityService extends AccessibilityService {
     }
 
     /**
-     * The state machine of an ended feed.
-     *
-     * At the end the fence holds. Above the end there is no fence at all and
-     * scrolling is native. The feed's own scroll events say which of the two
-     * applies, and pull it back when it slipped past the end.
+     * An ended feed that reports its position gets a curtain: a window that
+     * takes no touches at all, black from the end of the feed downward, that
+     * follows the feed's own scroll events. Scrolling is entirely native in
+     * both directions; there is simply nothing to see past the end.
      */
     private void onScrolledWhileEnded(FeedState state, AccessibilityEvent event, long now) {
         if (!state.positionKnown) return;
-
-        // Events from a different list in the same app say nothing about the
-        // feed that ended.
-        if (state.feedViewId != null) {
-            AccessibilityNodeInfo source = event.getSource();
-            if (source != null) {
-                String id = source.getViewIdResourceName();
-                source.recycle();
-                if (id != null && !id.equals(state.feedViewId)) return;
-            }
-        }
-
+        if (!fromFeedNode(state, event)) return;
         if (!state.observePosition(event)) return;
 
-        float slack = state.profile == Feeds.PROFILE_ITEM ? 0f : screenHeight * 0.15f;
-        float overshoot = state.overshoot();
-
-        if (overshoot >= -slack) {
-            if (!state.atEnd) {
-                state.atEnd = true;
-                log("END reached again pos=" + state.position);
-                showWall(state.key);
-            }
-            float tolerance = state.profile == Feeds.PROFILE_ITEM ? 0.5f : screenHeight * 0.2f;
-            if (overshoot > tolerance) pullBackToEnd(state, now);
-        } else if (state.atEnd) {
-            state.atEnd = false;
-            log("ABOVE end pos=" + state.position + " end=" + state.endPosition);
-            hideWall();
+        if (curtain == null) {
+            showWall(state.key);
+            return;
         }
+
+        updateCurtain(state);
+
+        // Deep past the end there is only black. Best effort: bring the feed
+        // back so the user does not have to scroll all the way up again.
+        if (overshootPixels(state) > curtainHeight * 1.2f) pullBackToEnd(state, now);
+    }
+
+    /**
+     * Events from a different list in the same app say nothing about the
+     * feed. True when the event comes from the feed's own node, or when no
+     * node id is known to compare against.
+     */
+    private boolean fromFeedNode(FeedState state, AccessibilityEvent event) {
+        if (state.feedViewId == null) return true;
+        AccessibilityNodeInfo source = event.getSource();
+        if (source == null) return true;
+        String id = source.getViewIdResourceName();
+        source.recycle();
+        return id == null || id.equals(state.feedViewId);
     }
 
     private long lastPullAt;
@@ -377,7 +378,7 @@ public class EndAccessibilityService extends AccessibilityService {
             if (node == null) return;
 
             boolean done = false;
-            if (state.profile == Feeds.PROFILE_ITEM && Build.VERSION.SDK_INT >= 23) {
+            if (state.profile == Feeds.PROFILE_ITEM && !state.positionInPixels && Build.VERSION.SDK_INT >= 23) {
                 Bundle args = new Bundle();
                 args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_ROW_INT, Math.round(state.endPosition));
                 args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_COLUMN_INT, 0);
@@ -386,7 +387,6 @@ public class EndAccessibilityService extends AccessibilityService {
             }
             if (!done) done = node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
             log("PULL back to end ok=" + done + " overshoot=" + state.overshoot());
-            pulseFooter();
         } catch (Exception e) {
             log("PULL failed", e);
         } finally {
@@ -525,6 +525,7 @@ public class EndAccessibilityService extends AccessibilityService {
             FeedState state = stateFor(activeKey);
             state.onEntered(now);
             expireStaleProgress(state, now);
+            if (state.isLocked(now)) state.assumeAtEnd();
             Diag.lastFeed = activeKey;
             Diag.lastProgress = state.progress;
             log("FEED key=" + activeKey
@@ -536,10 +537,7 @@ public class EndAccessibilityService extends AccessibilityService {
             if (wallKey != null) log("WALL DOWN because feed is now " + activeKey);
             hideWall();
         }
-        if (activeKey != null) {
-            FeedState state = stateFor(activeKey);
-            if (state.isLocked(now) && state.atEnd) showWall(activeKey);
-        }
+        if (activeKey != null && stateFor(activeKey).isLocked(now)) showWall(activeKey);
     }
 
     private FeedState stateFor(String key) {
@@ -564,10 +562,13 @@ public class EndAccessibilityService extends AccessibilityService {
         state.lockedUntil = now + config.cooldownMillis();
         state.lastActivityAt = now;
         state.pinEnd();
+        if (state.positionInPixels) state.endPosition += dp(FOOTER_DP);
         EndPrefs.setLockedUntil(this, state.key, state.lockedUntil);
 
         log("END REACHED key=" + state.key + " at=" + state.position
-                + (state.positionKnown ? "" : " (position unknown)"));
+                + (state.positionKnown
+                    ? (state.positionInPixels ? " px" : " items")
+                    : " (position unknown, using fence)"));
         showWall(state.key);
     }
 
@@ -607,6 +608,261 @@ public class EndAccessibilityService extends AccessibilityService {
      * The feed stays visible underneath. Nothing covers the screen.
      */
     private void showWall(String key) {
+        FeedState state = stateFor(key);
+        if (state.positionKnown && state.feedBounds != null) {
+            showCurtain(state);
+        } else {
+            showFence(key);
+        }
+    }
+
+    // ---------------------------------------------------------------- curtain
+
+    private static final int FOOTER_DP = 64;
+    private static final int LEAD_DP = 56;
+
+    private View curtain;
+    private View curtainSheet;
+    private WindowManager.LayoutParams curtainParams;
+    private int curtainHeight;
+    private long lastBarMeasureAt;
+    private int lastBarTop = -1;
+
+    private void showCurtain(FeedState state) {
+        if (windowManager == null) return;
+
+        if (curtain != null && state.key.equals(wallKey)) {
+            handler.removeCallbacks(tick);
+            handler.post(tick);
+            updateCurtain(state);
+            return;
+        }
+
+        hideWall();
+        wallKey = state.key;
+
+        Rect area = curtainArea(state);
+        curtainHeight = area.height();
+
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.TRANSPARENT);
+
+        LinearLayout sheet = new LinearLayout(this);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+
+        View line = new View(this);
+        line.setBackgroundColor(ACID);
+        sheet.addView(line, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(2)));
+
+        LinearLayout footer = new LinearLayout(this);
+        footer.setOrientation(LinearLayout.HORIZONTAL);
+        footer.setGravity(Gravity.CENTER_VERTICAL);
+        footer.setPadding(dp(18), 0, dp(18), 0);
+        footer.setBackgroundColor(Color.rgb(5, 5, 5));
+
+        ImageView mark = new ImageView(this);
+        mark.setImageResource(R.drawable.end_wordmark);
+        mark.setScaleType(ImageView.ScaleType.FIT_START);
+        mark.setContentDescription("END");
+        footer.addView(mark, new LinearLayout.LayoutParams(dp(62), dp(20)));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        wallHeadline = label(headlineFor(state.key), ACID, 10, Typeface.BOLD);
+        wallHeadline.setLetterSpacing(.14f);
+        copy.addView(wallHeadline);
+        wallCountdown = label("--:--", TEXT, 12, Typeface.BOLD);
+        LinearLayout.LayoutParams countdownLp = wrap();
+        countdownLp.topMargin = dp(1);
+        copy.addView(wallCountdown, countdownLp);
+        LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        copyLp.leftMargin = dp(14);
+        footer.addView(copy, copyLp);
+
+        sheet.addView(footer, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(FOOTER_DP)));
+
+        // Black below the footer. Tall enough to cover the whole feed when
+        // the sheet is pushed all the way up; clipped by the window otherwise.
+        View filler = new View(this);
+        filler.setBackgroundColor(Color.rgb(5, 5, 5));
+        sheet.addView(filler, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, realScreenHeight()));
+
+        root.addView(sheet, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP));
+        curtainSheet = sheet;
+        wallColumn = sheet;
+
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                area.width(),
+                area.height(),
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT);
+        lp.gravity = Gravity.TOP | Gravity.START;
+        lp.x = area.left;
+        lp.y = area.top;
+
+        try {
+            windowManager.addView(root, lp);
+            curtain = root;
+            curtainParams = lp;
+            Diag.wallUp = true;
+            updateCurtain(state);
+            log("CURTAIN UP key=" + state.key + " area=" + area.toShortString()
+                    + " unit=" + (state.positionInPixels ? "px" : "items"));
+            handler.post(tick);
+        } catch (Exception e) {
+            log("CURTAIN FAILED key=" + state.key, e);
+            curtain = null;
+            curtainParams = null;
+            curtainSheet = null;
+            wallColumn = null;
+            wallKey = null;
+        }
+    }
+
+    /** Slide the sheet so its top edge sits at the end of the feed. */
+    private void updateCurtain(FeedState state) {
+        if (curtainSheet == null) return;
+
+        float over = overshootPixels(state);
+        // Events trail the frame by a little; while moving forward, lead the
+        // content so no strip of new items shows under the footer.
+        float lead = state.lastMoveForward && over > -dp(8) ? dp(LEAD_DP) : 0f;
+        float covered = Math.max(0f, over + lead);
+        float rest = curtainHeight - dp(FOOTER_DP) - dp(2);
+        float translation = Math.max(0f, rest - covered);
+        curtainSheet.setTranslationY(translation);
+    }
+
+    private float overshootPixels(FeedState state) {
+        float over = state.overshoot();
+        return state.positionInPixels ? over : over * curtainHeight;
+    }
+
+    private void relayoutCurtain(FeedState state) {
+        if (curtain == null || curtainParams == null) return;
+        Rect area = curtainArea(state);
+        if (area.height() == curtainParams.height && area.top == curtainParams.y
+                && area.width() == curtainParams.width && area.left == curtainParams.x) return;
+        curtainParams.x = area.left;
+        curtainParams.y = area.top;
+        curtainParams.width = area.width();
+        curtainParams.height = area.height();
+        curtainHeight = area.height();
+        try {
+            windowManager.updateViewLayout(curtain, curtainParams);
+            updateCurtain(state);
+            log("CURTAIN moved to " + area.toShortString());
+        } catch (Exception e) {
+            log("CURTAIN relayout failed", e);
+        }
+    }
+
+    /**
+     * The screen area the feed occupies: its own bounds, trimmed to the
+     * screen, and trimmed above an app bar that sits over its bottom edge.
+     */
+    private Rect curtainArea(FeedState state) {
+        Rect feed = state.feedBounds;
+        int screenBottom = realScreenHeight() - navigationBarHeight();
+        int top = Math.max(statusBarHeight(), feed.top);
+        int bottom = Math.min(feed.bottom, screenBottom);
+        int left = Math.max(0, feed.left);
+        int right = Math.min(screenWidth, feed.right);
+
+        int barTop = bottomBarTop(state, bottom);
+        if (barTop > top + dp(120)) bottom = Math.min(bottom, barTop);
+
+        if (bottom - top < dp(120)) bottom = top + dp(120);
+        Rect area = new Rect();
+        area.left = left;
+        area.top = top;
+        area.right = right;
+        area.bottom = bottom;
+        return area;
+    }
+
+    /**
+     * Top edge of an app bar drawn over the bottom of the feed, or -1. Looks
+     * for a wide, shallow, non-scrolling node with a few children sitting on
+     * the feed's bottom edge, which is what a bottom navigation bar is.
+     */
+    private int bottomBarTop(FeedState state, int feedBottom) {
+        long now = System.currentTimeMillis();
+        if (now - lastBarMeasureAt < 800L) return lastBarTop;
+        lastBarMeasureAt = now;
+        lastBarTop = -1;
+
+        AccessibilityNodeInfo root = null;
+        try {
+            root = getRootInActiveWindow();
+            if (root == null) return -1;
+
+            Rect bounds = new Rect();
+            java.util.ArrayDeque<AccessibilityNodeInfo> stack = new java.util.ArrayDeque<>();
+            stack.push(root);
+            int visited = 0;
+
+            while (!stack.isEmpty() && visited++ < 500) {
+                AccessibilityNodeInfo node = stack.pop();
+                if (node == null) continue;
+
+                node.getBoundsInScreen(bounds);
+                boolean wide = bounds.width() >= screenWidth * 0.85f;
+                boolean shallow = bounds.height() >= dp(40) && bounds.height() <= dp(110);
+                boolean onEdge = bounds.bottom >= feedBottom - dp(4) && bounds.top >= feedBottom - dp(120);
+                boolean barLike = wide && shallow && onEdge && !node.isScrollable()
+                        && node.getChildCount() >= 3;
+                String id = node.getViewIdResourceName();
+                boolean isFeed = state.feedViewId != null && state.feedViewId.equals(id);
+
+                if (barLike && !isFeed) {
+                    lastBarTop = bounds.top;
+                    if (node != root) node.recycle();
+                    break;
+                }
+
+                // Children of a wide node are worth a look; deep subtrees of
+                // narrow ones are not.
+                if (bounds.height() >= dp(40) && bounds.bottom >= feedBottom - dp(160)) {
+                    int count = node.getChildCount();
+                    for (int i = count - 1; i >= 0; i--) {
+                        AccessibilityNodeInfo child = node.getChild(i);
+                        if (child != null) stack.push(child);
+                    }
+                }
+                if (node != root) node.recycle();
+            }
+            while (!stack.isEmpty()) {
+                AccessibilityNodeInfo leftover = stack.pop();
+                if (leftover != null && leftover != root) leftover.recycle();
+            }
+        } catch (Exception ignored) {
+            // Leave it at -1.
+        } finally {
+            if (root != null) root.recycle();
+        }
+        return lastBarTop;
+    }
+
+    // ------------------------------------------------------------------ fence
+
+    /**
+     * Fallback for a feed that reports no position at all: a fence that owns
+     * the touches, steps a page on a swipe and hands taps through.
+     */
+    private void showFence(String key) {
         if (windowManager == null) return;
 
         if (wall != null && key.equals(wallKey)) {
@@ -709,7 +965,7 @@ public class EndAccessibilityService extends AccessibilityService {
             wall = root;
             wallParams = lp;
             Diag.wallUp = true;
-            log("FENCE UP key=" + key + " band=" + top + ".." + (top + height));
+            log("FENCE UP (no position from this feed) key=" + key + " band=" + top + ".." + (top + height));
             handler.post(tick);
         } catch (Exception e) {
             log("FENCE FAILED key=" + key, e);
@@ -1031,6 +1287,7 @@ public class EndAccessibilityService extends AccessibilityService {
     }
 
     private void pulseFooter() {
+        if (curtain != null) return;   // the curtain's sheet is positioned by scroll, never pulsed
         if (wallColumn == null || wallHeadline == null) return;
 
         final String original = wallHeadline.getText().toString();
@@ -1059,6 +1316,16 @@ public class EndAccessibilityService extends AccessibilityService {
                 // The window was already gone.
             }
         }
+        if (curtain != null && windowManager != null) {
+            try {
+                windowManager.removeView(curtain);
+            } catch (Exception ignored) {
+                // The window was already gone.
+            }
+        }
+        curtain = null;
+        curtainParams = null;
+        curtainSheet = null;
 
         wall = null;
         wallParams = null;

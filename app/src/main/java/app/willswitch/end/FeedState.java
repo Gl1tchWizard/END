@@ -53,6 +53,8 @@ final class FeedState {
      * the end.
      */
     boolean positionKnown;
+    boolean positionInPixels;
+    boolean lastMoveForward;
     float position;
     float endPosition;
 
@@ -90,6 +92,10 @@ final class FeedState {
         progress = 0f;
         atEnd = true;
         endPosition = 0f;
+        positionKnown = false;
+        positionInPixels = false;
+        positionMode = POS_NONE;
+        position = 0f;
         lastItemIndex = NO_VALUE;
         lastScrollY = NO_VALUE;
         lastBlindStepAt = 0L;
@@ -110,41 +116,60 @@ final class FeedState {
         atEnd = true;
     }
 
+    private static final int POS_NONE = 0;
+    private static final int POS_DELTA = 1;
+    private static final int POS_OFFSET = 2;
+    private static final int POS_INDEX = 3;
+    private int positionMode = POS_NONE;
+
     /**
      * Update the position from a scroll event. Returns false when the event
      * carries nothing usable.
+     *
+     * The first usable event fixes the unit for the life of the feed, and
+     * exact pixel deltas are preferred: a RecyclerView's reported offset is an
+     * estimate scaled by average item height, its delta is the real pixels.
      */
     boolean observePosition(AccessibilityEvent event) {
-        if (profile == Feeds.PROFILE_ITEM) {
-            int from = event.getFromIndex();
-            if (from >= 0) {
-                position = from;
-                positionKnown = true;
-                return true;
-            }
-        }
-
-        int scrollY = event.getScrollY();
-        if (scrollY >= 0) {
-            position = scrollY;
-            positionKnown = true;
-            return true;
-        }
-
         int dy = event.getScrollDeltaY();
-        if (dy != 0 && dy != -1) {
-            position += dy;
-            positionKnown = true;
-            return true;
+        int offset = event.getScrollY();
+        int from = event.getFromIndex();
+        boolean deltaValid = dy != 0 && dy != -1;
+
+        if (positionMode == POS_NONE) {
+            if (deltaValid) positionMode = POS_DELTA;
+            else if (offset >= 0) positionMode = POS_OFFSET;
+            else if (from >= 0) positionMode = POS_INDEX;
+            else return false;
         }
 
-        int from = event.getFromIndex();
-        if (from >= 0) {
-            position = from;
-            positionKnown = true;
-            return true;
+        float before = position;
+        switch (positionMode) {
+            case POS_DELTA:
+                if (!deltaValid) return false;
+                position += dy;
+                break;
+            case POS_OFFSET:
+                if (offset < 0) return false;
+                position = offset;
+                break;
+            default:
+                if (from < 0) return false;
+                position = from;
+                break;
         }
-        return false;
+
+        positionInPixels = positionMode != POS_INDEX;
+        positionKnown = true;
+        lastMoveForward = position > before;
+        return true;
+    }
+
+    /** Back in the app after leaving: assume the feed stands at its end. */
+    void assumeAtEnd() {
+        if (!positionKnown) return;
+        position = endPosition;
+        lastMoveForward = false;
     }
 
     /** How far past the end the feed stands, in the feed's own unit. */
