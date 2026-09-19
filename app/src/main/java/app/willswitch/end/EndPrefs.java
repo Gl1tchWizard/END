@@ -135,16 +135,28 @@ public final class EndPrefs {
         prefs(c).edit().putBoolean(KEY_BROWSER_SITES, enabled).apply();
     }
 
-    /** Bumps a counter the service listens for; it then clears every feed. */
+    /**
+     * Clears every stored lock, then bumps a counter the service listens for
+     * so it drops what it holds in memory. The locks are cleared here and not
+     * by the service: a service that is restarting misses the counter, and a
+     * service that just started holds no feeds in memory to clear.
+     */
     public static void requestReset(Context c) {
-        prefs(c).edit().putLong(KEY_RESET, System.currentTimeMillis()).apply();
+        SharedPreferences p = prefs(c);
+        SharedPreferences.Editor edit = p.edit();
+        for (String key : p.getAll().keySet()) {
+            if (key.startsWith(LOCK_PREFIX)) edit.remove(key);
+        }
+        edit.putLong(KEY_RESET, System.currentTimeMillis()).apply();
     }
 
     // Lock state survives a service restart, so it is the one piece of session
     // state that is persisted. It is written on transitions only, never per
     // event: reaching END, and clearing END.
 
-    private static String lockKey(String feedKey) { return "locked_until:" + feedKey; }
+    private static final String LOCK_PREFIX = "locked_until:";
+
+    private static String lockKey(String feedKey) { return LOCK_PREFIX + feedKey; }
 
     public static long lockedUntil(Context c, String feedKey) {
         return prefs(c).getLong(lockKey(feedKey), 0L);
