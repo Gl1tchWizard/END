@@ -142,8 +142,10 @@ final class RawLog {
             }
         }
 
+        // Walking the tree while a list scrolls is felt in the app, so that
+        // only happens at the VERBOSE level.
         boolean stateChange = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
-        boolean due = now - lastTreeAt > TREE_EVERY_MS;
+        boolean due = mode == 2 && now - lastTreeAt > TREE_EVERY_MS;
         if (!treePending && (stateChange || (due && type == AccessibilityEvent.TYPE_VIEW_SCROLLED))) {
             treePending = true;
             handler.postDelayed(new Runnable() {
