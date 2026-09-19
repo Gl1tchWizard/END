@@ -24,6 +24,8 @@ import java.util.Map;
  *   adb shell setprop log.tag.ENDRAW DEBUG     every event type, stock view filter
  *   adb shell setprop log.tag.ENDRAW VERBOSE   same, plus views marked not important
  *   adb shell setprop log.tag.ENDRAW INFO      off again
+ *   adb shell setprop log.tag.ENDPASSIVE DEBUG while raw logging is on, END only
+ *                                              watches: no counting, no end
  *   adb logcat -s ENDRAW
  *
  * It prints classes, view ids, bounds and scroll numbers. It never prints
@@ -41,6 +43,7 @@ final class RawLog {
     private static final int TREE_MAX_NODES = 1500;
 
     private static int mode;
+    private static boolean passive;
     private static long checkedAt;
     private static int baseTypes;
     private static int baseFlags;
@@ -73,8 +76,18 @@ final class RawLog {
             int wanted = Log.isLoggable(TAG, Log.VERBOSE) ? 2
                     : Log.isLoggable(TAG, Log.DEBUG) ? 1 : 0;
             if (wanted != mode) apply(service, wanted);
+            boolean quiet = wanted != 0 && Log.isLoggable("ENDPASSIVE", Log.DEBUG);
+            if (quiet != passive) {
+                passive = quiet;
+                Log.i(TAG, "RAW passive=" + passive);
+            }
         }
         return mode != 0;
+    }
+
+    /** True when END should only watch: the app must behave as if END were absent. */
+    static boolean passive() {
+        return mode != 0 && passive;
     }
 
     private static void apply(AccessibilityService service, int wanted) {

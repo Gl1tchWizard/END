@@ -199,6 +199,10 @@ public class EndAccessibilityService extends AccessibilityService {
 
         if (RawLog.sync(this)) {
             RawLog.event(this, event, handler);
+            if (RawLog.passive()) {
+                if (wallKey != null) hideWall();
+                return;
+            }
             if (!RawLog.isCounted(event.getEventType())) return;
         }
 
