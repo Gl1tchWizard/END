@@ -37,8 +37,8 @@ android {
         applicationId 'app.willswitch.end'
         minSdk 28
         targetSdk 36
-        versionCode 17
-        versionName 'v17'
+        versionCode 18
+        versionName 'v18'
     }
 
     if (hasSigningKey) {

@@ -22,33 +22,34 @@ One rule: after the chosen amount of feed, the scroll ends.
 
 Works on Android 9 and up.
 
-## How the curtain works
+## How the end works
 
 END learns which scrollable node carries the feed from the feed's own scroll
-events, its bounds on screen, and its position: exact pixel deltas when the
-app reports them, its scroll offset otherwise, an item index as a last resort.
+events: its id, its bounds on screen, and its position, using exact pixel
+deltas when the app reports them, its scroll offset otherwise, an item index
+as a last resort.
 
-At the limit the end is pinned at the current position. A window that takes
-no touches is placed over the feed's own area. Inside it a sheet slides: an
-acid line, the END footer, and black below. At the end the footer sits on the
-bottom edge of the feed. Every scroll event moves the sheet by the same
-amount the content moved, so past the end the footer rises and the black
-grows, and on the way back it settles again. A small lead is added while
-moving forward so event latency never shows a strip of new content.
+At the limit the position is pinned. A window that takes no touches is placed
+over exactly the feed's own bounds, and inside it a sheet slides: a thin acid
+line, an END OF SCROLLING marker, and opaque black below. At the end the
+marker sits on the bottom edge of the feed.
 
-Because the window is untouchable, scrolling, tapping, long pressing and the
-app's own bars all work natively.
+Two things then happen on every scroll event:
 
-Past the end the feed springs back, like a web page after an overscroll. When
-the feed comes to rest past the end, END first asks the feed's own node to
-scroll back; if the app refuses, END drags the feed back by the overshoot
-distance with a slow injected swipe that ends at zero velocity, so it cannot
-fling. That drag is the only gesture END ever performs, it happens only as the
-direct result of the user's own overscroll, and it stops after three tries.
+- the sheet moves by the amount the content moved, so the marker stays on the
+  end of the feed and nothing past it is ever visible;
+- if the feed moved forward past the end, END puts it straight back with
+  `ACTION_SCROLL_BACKWARD` on the feed's own node, rate limited to about six
+  times a second. That is what makes it a stop rather than a black screen.
 
-Feeds that report no position at all fall back to a fence: a touch-owning
-overlay that steps a page on a swipe and hands taps through. The log says
-which of the two a feed got.
+A backward scroll is never answered. Scrolling back through what you already
+saw is the app's own scrolling, untouched, which is why it stays smooth.
+
+If an app refuses the scroll action, END waits until the feed is at rest and
+drags it back with a slow injected swipe that ends at zero velocity so nothing
+flings. Feeds that report no position at all fall back to a fence: a
+touch-owning overlay that steps a page on a swipe and hands taps through. The
+log and the status card say which of the three a feed got.
 
 ## Counting
 

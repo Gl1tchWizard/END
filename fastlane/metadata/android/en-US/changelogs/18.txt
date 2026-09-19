@@ -1,0 +1,4 @@
+- The end now holds. Scrolling past it is answered immediately, so the screen no longer fills with black.
+- The end marker sits on the real bottom edge of the feed, with nothing showing underneath.
+- Scrolling back stays fully native: END never answers a backward scroll.
+- Plain end marker, no logo.

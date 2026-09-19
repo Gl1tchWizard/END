@@ -61,10 +61,11 @@ executes nothing on the user's behalf. This matters for the 30 October 2025
 policy update, which prohibits any use of the API that lets an app
 autonomously initiate, plan and execute actions.
 
-**The one gesture END dispatches.** When the user overscrolls a feed past its
-end and lets go, END returns the feed to the end: first with the node's own
-scroll-back action, and only if the app refuses that, with a slow drag of the
-overshoot distance dispatched through `dispatchGesture`. This is overscroll
+**The one gesture END dispatches.** When the user scrolls a feed past its end,
+END returns the feed to the end: first with the node's own scroll-back action,
+which is not a gesture, and only if the app refuses that, once the feed is at
+rest, with a slow drag of the overshoot distance dispatched through
+`dispatchGesture`. This is overscroll
 correction, the equivalent of a web page snapping back, triggered solely by
 the user's own overscroll a moment earlier, limited to three attempts, and it
 never initiates, plans or executes anything else. For feeds that report no
