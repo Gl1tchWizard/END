@@ -169,4 +169,24 @@ public final class EndPrefs {
     public static void clearLock(Context c, String feedKey) {
         prefs(c).edit().remove(lockKey(feedKey)).apply();
     }
+
+    // What is known about how a feed reports, written on the rare moments it
+    // is learned. It decides how an ended feed is shown after a restart,
+    // before the feed has had a chance to report anything. Only a feed known
+    // to report no scrolling at all gets the touch-owning fence; a feed that
+    // scrolls, or that nothing is known about yet, gets the curtain.
+
+    private static String signalKey(String feedKey) { return "scroll_signal:" + feedKey; }
+
+    public static boolean hasScrollSignal(Context c, String feedKey) {
+        return prefs(c).getInt(signalKey(feedKey), 0) > 0;
+    }
+
+    public static boolean knownSilent(Context c, String feedKey) {
+        return prefs(c).getInt(signalKey(feedKey), 0) < 0;
+    }
+
+    public static void setScrollSignal(Context c, String feedKey, boolean scrolls) {
+        prefs(c).edit().putInt(signalKey(feedKey), scrolls ? 1 : -1).apply();
+    }
 }

@@ -71,3 +71,9 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 }
+
+// The app itself still depends on nothing. JUnit only runs the unit tests and
+// is never packaged.
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}

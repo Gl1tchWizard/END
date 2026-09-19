@@ -6,19 +6,15 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Static knowledge about which apps carry feeds, how those feeds report
- * scrolling, and how to recognise a feed site inside a browser.
+ * Static knowledge about which apps carry feeds and how to recognise a feed
+ * site inside a browser. How a feed reports its scrolling is not listed here:
+ * every list says that itself, in its own scroll events.
  *
  * Nothing here touches disk or Android services, so it is safe to call from
  * the input and accessibility hot paths.
  */
 public final class Feeds {
     private Feeds() {}
-
-    /** One list item equals one screen. Shorts, Reels, TikTok. */
-    public static final int PROFILE_ITEM = 0;
-    /** Continuous feed, progress measured in pixels against screen height. */
-    public static final int PROFILE_PIXEL = 1;
 
     public static final String SYSTEM_UI = "com.android.systemui";
 
@@ -61,28 +57,9 @@ public final class Feeds {
             "linkedin.com"
     };
 
-    private static final Map<String, Integer> APP_PROFILES;
-    private static final Map<String, Integer> HOST_PROFILES;
     private static final Map<String, String> URL_BAR_IDS;
 
     static {
-        Map<String, Integer> apps = new HashMap<>();
-        apps.put("com.zhiliaoapp.musically", PROFILE_ITEM);
-        apps.put("com.ss.android.ugc.trill", PROFILE_ITEM);
-        apps.put("com.google.android.youtube", PROFILE_ITEM);
-        apps.put("com.instagram.android", PROFILE_ITEM);
-        apps.put("com.snapchat.android", PROFILE_ITEM);
-        apps.put("com.reddit.frontpage", PROFILE_PIXEL);
-        apps.put("com.twitter.android", PROFILE_PIXEL);
-        apps.put("com.facebook.katana", PROFILE_PIXEL);
-        apps.put("com.instagram.barcelona", PROFILE_PIXEL);
-        apps.put("com.linkedin.android", PROFILE_PIXEL);
-        APP_PROFILES = Collections.unmodifiableMap(apps);
-
-        Map<String, Integer> hosts = new HashMap<>();
-        hosts.put("tiktok.com", PROFILE_ITEM);
-        HOST_PROFILES = Collections.unmodifiableMap(hosts);
-
         // View ids of the address bar per browser. END reads this one node and
         // keeps only the host from it. Nothing else in the page is queried.
         Map<String, String> ids = new HashMap<>();
@@ -109,15 +86,6 @@ public final class Feeds {
 
     public static String urlBarId(String pkg) {
         return URL_BAR_IDS.get(pkg);
-    }
-
-    public static int profileFor(String pkg, String host) {
-        if (host != null) {
-            Integer byHost = HOST_PROFILES.get(host);
-            return byHost != null ? byHost : PROFILE_PIXEL;
-        }
-        Integer byApp = APP_PROFILES.get(pkg);
-        return byApp != null ? byApp : PROFILE_PIXEL;
     }
 
     /**
