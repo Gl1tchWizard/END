@@ -114,6 +114,7 @@ public class EndAccessibilityService extends AccessibilityService {
 
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         config = EndPrefs.snapshot(this);
+        RawLog.reset();
         readMetrics();
         attachSensor();
 
@@ -195,6 +196,11 @@ public class EndAccessibilityService extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || config == null) return;
+
+        if (RawLog.sync(this)) {
+            RawLog.event(this, event, handler);
+            if (!RawLog.isCounted(event.getEventType())) return;
+        }
 
         CharSequence packageName = event.getPackageName();
         if (packageName == null) return;
