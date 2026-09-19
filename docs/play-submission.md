@@ -57,18 +57,20 @@ either. There is no alternative that would achieve the same result.
 **What it does not do.** END does not read page text, messages, images, form
 fields or passwords. It takes no screenshots. It never captures or intercepts
 the user's touches; its overlay is untouchable. It performs no automation and
-executes nothing on the user's behalf. This matters for the 30 October 2025
+executes nothing on the user's behalf, with the one exception described next. This matters for the 30 October 2025
 policy update, which prohibits any use of the API that lets an app
 autonomously initiate, plan and execute actions.
 
 **The one gesture END dispatches.** When the user scrolls a feed past its end,
-END returns the feed to the end: first with the node's own scroll-back action,
-which is not a gesture, and only if the app refuses that, once the feed is at
-rest, with a slow drag of the overshoot distance dispatched through
-`dispatchGesture`. This is overscroll
-correction, the equivalent of a web page snapping back, triggered solely by
-the user's own overscroll a moment earlier, limited to three attempts, and it
-never initiates, plans or executes anything else. For feeds that report no
+END returns the feed to the end with a single drag of the overshoot distance,
+dispatched through `dispatchGesture`: it touches the list, which stops a
+fling, drags it back by exactly the distance it went over, and lets go at zero
+velocity. A list that a hard fling carried more than a screen past the end is
+first paged back with the node's own scroll-back action, which is not a
+gesture. This is overscroll correction, the equivalent of a web page snapping
+back. It is triggered solely by the user's own overscroll a moment earlier,
+never by a backward scroll, limited to four attempts per overscroll and ten in
+ten seconds, and it never initiates, plans or executes anything else. For feeds that report no
 position, a tap the user makes on the fence is passed through as a tap at the
 same spot.
 

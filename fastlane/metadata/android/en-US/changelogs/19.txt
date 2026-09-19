@@ -1,0 +1,5 @@
+- Counting is rebuilt on what feeds were measured to report. YouTube Home counts real screens, one Short is one screen, and sites in browsers are no longer counted double.
+- The end sits on the exact spot where your limit fell, above the app's own navigation bar.
+- A feed pushed past its end comes straight back, in YouTube, in Shorts and in the browser. Scrolling back stays the app's own.
+- The end no longer flickers off when another app shows a bubble or a toolbar.
+- "Reset all feeds now" always resets.
