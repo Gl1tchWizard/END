@@ -74,6 +74,12 @@ ten seconds, and it never initiates, plans or executes anything else. For feeds 
 position, a tap the user makes on the fence is passed through as a tap at the
 same spot.
 
+**The one link END opens.** On some end markers there is a button to the part
+of the same app that no algorithm sorts, in YouTube the Subscriptions page.
+Tapping it sends an ordinary `ACTION_VIEW` link to that app, the same as
+tapping a link anywhere else. END presses nothing inside the other app and
+opens nothing the user did not tap.
+
 **Prominent disclosure.** Shown on first launch, before anything is enabled,
 as a dialog the user must actively accept. It is inside the app, appears in
 normal use rather than behind a menu, describes what is accessed and why, is

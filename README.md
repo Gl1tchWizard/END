@@ -12,10 +12,13 @@ used up, the page stops.
 One rule: after the chosen amount of feed, the scroll ends.
 
 - Default: 3 screens, then 20 minutes of no feed. Both adjustable.
-- The end is an end. A marker sits on the exact pixel where the limit fell
-  and everything past it is covered. Push past it and the page comes straight
-  back, the way an ordinary web page comes back from an overscroll. Scroll up
-  and the marker leaves through the bottom edge like any footer.
+- The end is an end. A marker at the bottom of the screen sits on the exact
+  pixel where the limit fell and everything past it is covered. Push past it
+  and the page comes straight back, the way an ordinary web page comes back
+  from an overscroll. Scroll up and the marker leaves through the bottom edge
+  like any footer.
+- The end has a way out. Where an app has a part that no algorithm sorts, the
+  marker offers one tap to it: in YouTube, Subscriptions. That list has no end.
 - Nothing is intercepted. Every tap and every swipe goes to the app, and
   scrolling back is the app's own scrolling. The one thing END does to the
   app is bring its list back when it has gone past the end.
@@ -45,9 +48,14 @@ place after a tab change are not movement.
 
 **The end.** At the limit the end is pinned at the exact pixel where the limit
 fell, even when the event that crossed it was half a screen further on. A
-window that takes no touches covers the visible part of the list: its bounds,
-above any bar the app draws over its bottom edge. Inside it a sheet hangs from
-the end: a thin acid line, an END OF SCROLLING marker, opaque black below.
+window that takes no touches runs from the top of the list to the bottom of
+the screen. Inside it a sheet hangs from the end: a thin acid line, an END OF
+SCROLLING marker, opaque black below. The end is the bottom of the screen: a
+page that has ended has nothing underneath it, so at rest the marker takes the
+last strip of the screen, over the app's own bottom bar. The marker itself
+swallows touches, because a tap that went through it would press a button of
+that bar which nobody can see. Scroll back a little and the marker is gone and
+the bar is back.
 
 **Past the end.** The sheet follows every scroll event, so nothing past the
 end is ever shown for longer than the tenth of a second an event takes. When
@@ -63,6 +71,16 @@ saw is the app's own scrolling, untouched, which is why it stays smooth.
 
 Every other list of an ended feed ends where it stands when it is first seen,
 so switching tabs does not open a fresh feed.
+
+**The way out.** Where `Feeds.exitFor` knows a link into the part of an app
+that no algorithm sorts, the marker shows it as a pill, and a tap on it hands
+that link to the app. The list that comes on screen next is the way out: it
+has no end and counts for nothing, while the feed behind it stays ended. It is
+the user's tap and an ordinary link; END presses nothing inside the app. Only
+links that were tried on a device are listed, which today is YouTube's
+Subscriptions. Sites in a browser have none, because telling a subscriptions
+page from the home page would mean reading the path of the address, and END
+reads only the host.
 
 A feed that is known to report no scrolling at all falls back to a fence: a
 touch-owning overlay that steps a page on a swipe and hands taps through. It
@@ -88,6 +106,21 @@ asks Android to report touches outside itself; Android delivers those as
 autoplay, refreshes and progress bars, and it is why `notificationTimeout` is
 0 in the service config: a timeout would coalesce the burst into nothing.
 
+## What the feed learns from you
+
+A feed has no setting for being less compelling. It learns from behaviour: how
+long you stay, whether you scroll on. "They kept scrolling" is the strongest
+signal it has, and an ended scroll takes exactly that away, every session.
+
+Two things go with it, both the user's own act. The way out above turns the
+app from a slot machine into a subscription list. And the settings screen
+links to the platform's own page for pausing or clearing the history it
+recommends from; for YouTube that is `myactivity.google.com/product/youtube`.
+
+What END will not do is make signals up: no pressing "not interested" on
+things nobody looked at, no faked watch time. That is against every platform's
+terms and it is not what END is.
+
 ## Browsers
 
 END recognises feed sites inside Chrome, Chrome Beta, Brave, Firefox, Fenix,
@@ -106,10 +139,12 @@ it showed last.
 1. Run from Android Studio, or `gradlew installDebug`, then check the service
    under Settings, Accessibility, END. The status card shows the version.
 2. Set LIMIT to 1. "Reset all feeds now" starts every feed over.
-3. YouTube Home: scroll one screen. The marker appears above YouTube's own
-   navigation bar. Push on: black follows the content up and the list comes
-   back to the marker. Scroll up: the marker leaves, scrolling is native.
-   Scroll down again: it returns at the same place.
+3. YouTube Home: scroll one screen. The marker appears at the bottom of the
+   screen. Push on: black follows the content up and the list comes back to
+   the marker. Scroll up: the marker leaves, YouTube's own bar is back and
+   scrolling is native. Scroll down again: it returns at the same place. Tap
+   SUBSCRIPTIONS on the marker: the Subscriptions page opens and scrolls
+   freely; back on Home the end still stands.
 4. YouTube Shorts: swipe to one new Short. Swipe again: the next Short starts
    to come up under black and the same Short returns.
 5. youtube.com in Brave: the same as Home, with the marker above Brave's

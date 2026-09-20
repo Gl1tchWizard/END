@@ -52,8 +52,10 @@ changing any code:
 ## Layout
 
 - The YouTube Home list runs to the bottom of the screen, under YouTube's own
-  navigation bar (`id/bottom_bar_container`, from 2163). The list's bounds
-  alone put the end marker on top of that bar.
+  navigation bar (`id/bottom_bar_container`, from 2163). The Shorts pager and a
+  page in Brave stop above the app's bottom bar. v19 first put the marker above
+  that bar; on the phone it read as a strip floating over a menu, so the end is
+  now the bottom of the screen in all three.
 - While Home scrolls its top bar hides and the list's top edge goes from 371
   to 0. A drag downward first pulls that bar back in: 302 px of drag moved
   the list 39 px, and the bar took 320 px where its height is 270.
@@ -61,6 +63,10 @@ changing any code:
   A tree walk that enters it runs out of budget before reaching the bottom bar.
 - A drag that starts on the top bar or the chips row does not move the list.
 - In Shorts the seek bar is wide, shallow and on the bottom edge, like a bar.
+- The link `https://www.youtube.com/feed/subscriptions`, sent to the YouTube
+  app, opens its Subscriptions page. That page begins with a "most relevant"
+  shelf and carries ads, but below it the list is the user's own
+  subscriptions.
 
 ## Foreground
 
