@@ -573,8 +573,15 @@ public class EndAccessibilityService extends AccessibilityService {
         final float x = curtainParams.x + curtainParams.width * column;
         int barBottom = state.list == null ? curtainParams.y
                 : Math.max(curtainParams.y, state.list.restTop);
-        // Below the app's own bar, and below a web page's sticky header.
-        final float y0 = Math.max(barBottom + dp(48), curtainParams.y + curtainHeight * 0.18f);
+        // Below the app's own bar, and below a web page's sticky header. And
+        // never on END's own marker, which swallows every touch; the black
+        // under it lets them through.
+        float wanted = Math.max(barBottom + dp(48), curtainParams.y + curtainHeight * 0.18f);
+        if (guardTop != Integer.MIN_VALUE && wanted > guardTop - dp(24)
+                && wanted < guardTop + guardHeight + dp(24)) {
+            wanted = guardTop + guardHeight + dp(32);
+        }
+        final float y0 = wanted;
 
         springing = true;
         springTries++;
@@ -1020,9 +1027,12 @@ public class EndAccessibilityService extends AccessibilityService {
 
         FeedState.ListTrack list = state.list;
         if (list != null && list.endPinned && list.scrollable) {
-            // The marker takes the bottom strip of the list. Let it cover what
-            // lies just past the limit rather than the last of what was allowed.
-            list.endPosition += dp(FOOTER_DP);
+            // At rest the end line sits a marker's height above the list's
+            // bottom edge. Let the list rest that much further on, so the line
+            // lies exactly on the boundary between what was allowed and what
+            // was not, and the marker covers only the latter.
+            Rect listRect = listArea(state);
+            list.endPosition += Math.max(0, Math.min(listRect.bottom, bottomEdge()) - restLine(listRect));
         }
 
         springTries = 0;
@@ -1093,8 +1103,15 @@ public class EndAccessibilityService extends AccessibilityService {
     private WindowManager.LayoutParams curtainParams;
     private int curtainHeight;
 
-    /** Top edge of an app bar drawn over the bottom of the list, or -1. */
-    private int barTop = -1;
+    /**
+     * The marker is END's own and does nothing when touched. Without this a
+     * tap on it would land on whatever the app has underneath, its navigation
+     * bar for one, which nobody can see there.
+     */
+    private View markerGuard;
+    private WindowManager.LayoutParams guardParams;
+    private int guardTop = Integer.MIN_VALUE;
+    private int guardHeight;
 
     private void showCurtain(FeedState state) {
         if (windowManager == null) return;
@@ -1109,7 +1126,6 @@ public class EndAccessibilityService extends AccessibilityService {
         hideWall();
         wallKey = state.key;
 
-        barTop = measureBottomBar(state);
         Rect area = curtainArea(state);
         curtainHeight = area.height();
 
@@ -1127,7 +1143,8 @@ public class EndAccessibilityService extends AccessibilityService {
         LinearLayout footer = new LinearLayout(this);
         footer.setOrientation(LinearLayout.VERTICAL);
         footer.setGravity(Gravity.CENTER_VERTICAL);
-        footer.setPadding(dp(20), dp(11), dp(20), dp(13));
+        footer.setGravity(Gravity.TOP);
+        footer.setPadding(dp(20), dp(11), dp(20), dp(13) + handleInset());
         footer.setBackgroundColor(Color.rgb(5, 5, 5));
 
         wallHeadline = label(headlineFor(state.key), ACID, 11, Typeface.BOLD);
@@ -1140,7 +1157,7 @@ public class EndAccessibilityService extends AccessibilityService {
         footer.addView(wallCountdown, countdownLp);
 
         sheet.addView(footer, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(FOOTER_DP)));
+                ViewGroup.LayoutParams.MATCH_PARENT, markerHeight()));
 
         // Black below the footer. Tall enough to cover the whole feed when
         // the sheet is pushed all the way up; clipped by the window otherwise.
@@ -1177,9 +1194,10 @@ public class EndAccessibilityService extends AccessibilityService {
             Diag.wallUp = true;
             Diag.endMode = "curtain" + (state.list == null ? ", waiting for the list to move"
                     : " on " + state.list.unit());
+            attachGuard();
             updateCurtain(state);
             log("CURTAIN UP key=" + state.key + " area=" + area.toShortString()
-                    + (barTop > 0 ? " above a bar at " + barTop : ""));
+                    + " end line at " + restLine(listArea(state)));
             handler.post(tick);
         } catch (Exception e) {
             log("CURTAIN FAILED key=" + state.key, e);
@@ -1197,21 +1215,55 @@ public class EndAccessibilityService extends AccessibilityService {
      * the bottom edge like any footer, scroll down again and it returns.
      */
     private void updateCurtain(FeedState state) {
-        if (curtainSheet == null) return;
+        if (curtainSheet == null || curtainParams == null) return;
 
         float over = state.signedOvershoot();
         FeedState.ListTrack list = state.list;
         // Events trail the frame a little; while moving forward past the end,
         // lead the content so no strip of new items shows under the marker.
         float lead = list != null && list.lastMoveForward && over > 0f ? dp(LEAD_DP) : 0f;
-        float rest = curtainHeight - dp(FOOTER_DP) - dp(2);
+        float rest = restLine(listArea(state)) - curtainParams.y;
         float translation = Math.max(0f, Math.min(curtainHeight, rest - over - lead));
         curtainSheet.setTranslationY(translation);
+        placeGuard(Math.round(translation));
     }
 
-    private void relayoutCurtain(FeedState state, boolean measureBar) {
+    /** Height of the marker under its acid line, in pixels. */
+    private int markerHeight() {
+        return dp(FOOTER_DP) + handleInset();
+    }
+
+    /**
+     * On gesture navigation the screen runs on underneath Android's handle,
+     * and so does the end; the marker only keeps its text clear of it. A
+     * button bar is Android's own and is never covered.
+     */
+    private int handleInset() {
+        int inset = navigationBarHeight();
+        return inset <= dp(24) ? inset : 0;
+    }
+
+    /** The lowest pixel END may draw on. */
+    private int bottomEdge() {
+        int inset = navigationBarHeight();
+        return inset <= dp(24) ? realScreenHeight() : realScreenHeight() - inset;
+    }
+
+    /**
+     * Where the end line sits on screen when the list stands exactly at its
+     * end: the END is the bottom of the screen. The marker occupies the last
+     * strip of it, over the app's own bottom bar if it has one, because a page
+     * that has ended has nothing underneath it. Should a list stop higher up
+     * than that, the line sits on the list's bottom edge and the black runs
+     * on down, so nothing past the end can show between the two.
+     */
+    private int restLine(Rect listRect) {
+        int listBottom = Math.min(listRect.bottom, bottomEdge());
+        return Math.min(listBottom, bottomEdge() - markerHeight() - dp(2));
+    }
+
+    private void relayoutCurtain(FeedState state, boolean atRest) {
         if (curtain == null || curtainParams == null) return;
-        if (measureBar) barTop = measureBottomBar(state);
 
         Rect area = curtainArea(state);
         // The list's top edge comes and goes with the app's own bars, and the
@@ -1234,14 +1286,21 @@ public class EndAccessibilityService extends AccessibilityService {
         }
     }
 
-    /**
-     * The part of the screen where the feed is actually visible: the list's
-     * own bounds, inside the screen, and above any bar the app draws over the
-     * list's bottom edge. Measured: the YouTube home list runs to the very
-     * bottom of the screen, underneath YouTube's own navigation bar, so the
-     * list's bounds alone would put the end marker on top of that bar.
-     */
+    /** From the top of the list to the bottom of the screen. */
     private Rect curtainArea(FeedState state) {
+        Rect feed = listArea(state);
+
+        Rect area = new Rect();
+        area.left = Math.max(0, feed.left);
+        area.right = Math.min(screenWidth, feed.right);
+        area.top = Math.max(statusBarHeight(), feed.top);
+        area.bottom = bottomEdge();
+        if (area.bottom - area.top < dp(120)) area.top = area.bottom - dp(120);
+        return area;
+    }
+
+    /** The list's own band, for the fence, which must leave the app's bars alone. */
+    private Rect listBand(FeedState state) {
         Rect feed = listArea(state);
         int screenBottom = realScreenHeight() - navigationBarHeight();
 
@@ -1250,9 +1309,62 @@ public class EndAccessibilityService extends AccessibilityService {
         area.right = Math.min(screenWidth, feed.right);
         area.top = Math.max(statusBarHeight(), feed.top);
         area.bottom = Math.min(feed.bottom, screenBottom);
-        if (barTop > area.top + dp(120) && barTop < area.bottom) area.bottom = barTop;
         if (area.bottom - area.top < dp(120)) area.bottom = area.top + dp(120);
         return area;
+    }
+
+    private void attachGuard() {
+        if (markerGuard != null || windowManager == null) return;
+
+        View view = new View(this);
+        view.setOnTouchListener((v, event) -> true);
+
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT, 1,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSPARENT);
+        lp.gravity = Gravity.TOP | Gravity.START;
+        lp.x = 0;
+        lp.y = realScreenHeight() + dp(8);   // parked off screen until placed
+
+        try {
+            windowManager.addView(view, lp);
+            markerGuard = view;
+            guardParams = lp;
+            guardTop = Integer.MIN_VALUE;
+        } catch (Exception e) {
+            log("GUARD failed", e);
+        }
+    }
+
+    /** Keep the guard on the part of the marker that is on screen. */
+    private void placeGuard(int translation) {
+        if (markerGuard == null || guardParams == null || curtainParams == null) return;
+
+        int top = curtainParams.y + translation;
+        int bottom = Math.min(curtainParams.y + curtainHeight, top + dp(2) + markerHeight());
+        int height = bottom - top;
+        if (height < dp(8)) {
+            top = realScreenHeight() + dp(8);
+            height = 1;
+        }
+        if (Math.abs(top - guardTop) < 2 && height == guardHeight) return;
+
+        guardTop = top;
+        guardHeight = height;
+        guardParams.x = curtainParams.x;
+        guardParams.width = curtainParams.width;
+        guardParams.y = top;
+        guardParams.height = height;
+        try {
+            windowManager.updateViewLayout(markerGuard, guardParams);
+        } catch (Exception ignored) {
+            // The guard is gone; the end is coming down.
+        }
     }
 
     /** Bounds of the tracked list; before any list has moved, the best guess. */
@@ -1282,101 +1394,6 @@ public class EndAccessibilityService extends AccessibilityService {
         int top = statusBarHeight() + dp(TOP_STRIP_DP);
         int bottom = realScreenHeight() - navigationBarHeight() - dp(BOTTOM_STRIP_DP);
         return new Rect(0, top, screenWidth, Math.max(top + dp(120), bottom));
-    }
-
-    /**
-     * Top edge of the bar, or stack of bars, that the app draws over the
-     * bottom of the list: wide, shallow nodes outside the list that sit on
-     * its bottom edge. Walks the tree, so it runs when the end goes up and
-     * when the list comes to rest, never while it moves.
-     */
-    /** The list the bar was last measured for. */
-    private int barListId;
-
-    private int measureBottomBar(FeedState state) {
-        FeedState.ListTrack list = state.list;
-        if (list == null) return -1;
-
-        int listBottom = Math.min(list.bottom, realScreenHeight() - navigationBarHeight());
-        int zoneTop = list.top + (listBottom - list.top) / 2;
-        java.util.ArrayList<Rect> bars = new java.util.ArrayList<>();
-
-        AccessibilityNodeInfo root = null;
-        try {
-            root = getRootInActiveWindow();
-            if (root == null) return -1;
-
-            java.util.ArrayDeque<AccessibilityNodeInfo> stack = new java.util.ArrayDeque<>();
-            stack.push(root);
-            int visited = 0;
-
-            while (!stack.isEmpty() && visited++ < 600) {
-                AccessibilityNodeInfo node = stack.pop();
-                if (node == null) continue;
-
-                Rect bounds = new Rect();
-                node.getBoundsInScreen(bounds);
-                boolean isList = node.hashCode() == list.id;
-                // Only what is on screen and reaches into the lower half can
-                // hold the bar. Measured: YouTube keeps the list of the next
-                // tab alive off screen, zero pixels wide, and walking into it
-                // used up the whole budget before the bar was reached.
-                boolean inZone = bounds.bottom > zoneTop && bounds.width() > 0
-                        && bounds.left < screenWidth && bounds.right > 0;
-
-                if (!isList && inZone) {
-                    boolean wide = bounds.width() >= screenWidth * 0.85f;
-                    boolean shallow = bounds.height() >= dp(36) && bounds.height() <= dp(140);
-                    // A video's seek bar is wide and shallow and sits on the
-                    // bottom edge too, but it belongs to the content.
-                    CharSequence nodeClass = node.getClassName();
-                    boolean control = nodeClass != null && (nodeClass.toString().endsWith("SeekBar")
-                            || nodeClass.toString().endsWith("ProgressBar"));
-                    if (wide && shallow && !control && bounds.top >= zoneTop && bounds.top < listBottom
-                            && node.isVisibleToUser()) {
-                        bars.add(bounds);
-                    }
-                    int count = node.getChildCount();
-                    for (int i = count - 1; i >= 0; i--) {
-                        AccessibilityNodeInfo child = node.getChild(i);
-                        if (child != null) stack.push(child);
-                    }
-                }
-                if (node != root) node.recycle();
-            }
-            while (!stack.isEmpty()) {
-                AccessibilityNodeInfo left = stack.pop();
-                if (left != null && left != root) left.recycle();
-            }
-        } catch (Exception ignored) {
-            return -1;
-        } finally {
-            if (root != null) root.recycle();
-        }
-
-        // The lowest bar reaches the list's bottom edge; one more may sit on
-        // top of it, a mini player above a navigation bar for instance.
-        int edge = listBottom;
-        boolean found = false;
-        for (int pass = 0; pass < 3; pass++) {
-            int next = -1;
-            for (Rect bar : bars) {
-                boolean onEdge = pass == 0
-                        ? bar.bottom >= edge - dp(8)
-                        : Math.abs(bar.bottom - edge) <= dp(8);
-                if (onEdge && bar.top < edge && (next == -1 || bar.top < next)) next = bar.top;
-            }
-            if (next == -1) break;
-            edge = next;
-            found = true;
-        }
-        if (!found) {
-            // The window is sometimes caught mid-change and shows a handful of
-            // nodes. One empty look does not make a bar go away.
-            return barListId == list.id ? barTop : -1;
-        }
-        barListId = list.id;
-        return edge;
     }
 
     // ------------------------------------------------------------------ fence
@@ -1439,8 +1456,7 @@ public class EndAccessibilityService extends AccessibilityService {
         int screenBottom = realScreenHeight() - navigationBarHeight();
         int top;
         int height;
-        barTop = -1;
-        Rect area = curtainArea(stateFor(key));
+        Rect area = listBand(stateFor(key));
         top = area.top;
         height = area.height();
 
@@ -1815,6 +1831,16 @@ public class EndAccessibilityService extends AccessibilityService {
                 // The window was already gone.
             }
         }
+        if (markerGuard != null && windowManager != null) {
+            try {
+                windowManager.removeView(markerGuard);
+            } catch (Exception ignored) {
+                // The window was already gone.
+            }
+        }
+        markerGuard = null;
+        guardParams = null;
+        guardTop = Integer.MIN_VALUE;
         curtain = null;
         curtainParams = null;
         curtainSheet = null;
