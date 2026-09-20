@@ -75,6 +75,13 @@ final class FeedState {
         float endPosition;
         boolean lastMoveForward;
         long lastEventAt;
+
+        /**
+         * The list the user chose as the way out of an ended feed, the
+         * subscriptions page for one. It has no end and counts for nothing.
+         */
+        boolean free;
+
         private boolean arriving;
         private long arrivedAt;
 
@@ -107,6 +114,9 @@ final class FeedState {
     private final Map<Integer, ListTrack> lists = new LinkedHashMap<>();
     private final Set<String> shadows = new HashSet<>();
 
+    private long exitOpenUntil;
+    private int exitFromId;
+
     private long enteredAt;
     private long burstStartAt;
     private int burstCount;
@@ -131,10 +141,21 @@ final class FeedState {
         progress = 0f;
         burstStartAt = 0L;
         burstCount = 0;
+        exitOpenUntil = 0L;
         for (ListTrack l : lists.values()) {
             l.endPinned = false;
+            l.free = false;
             l.countedTo = l.position;
         }
+    }
+
+    /**
+     * The user tapped the way out. The next list to come on screen, other than
+     * the one being left, is that way out.
+     */
+    void openExit(long until) {
+        exitOpenUntil = until;
+        exitFromId = list == null ? 0 : list.id;
     }
 
     void clearLock() {
@@ -208,6 +229,16 @@ final class FeedState {
         return l;
     }
 
+    /** Give the current list to a way out that is waiting for it. True if it took it. */
+    boolean claimExit(long now) {
+        ListTrack l = list;
+        if (l == null || now >= exitOpenUntil || l.id == exitFromId) return false;
+        exitOpenUntil = 0L;
+        l.free = true;
+        l.endPinned = false;
+        return true;
+    }
+
     private static boolean same(String a, String b) {
         return a == null ? b == null : a.equals(b);
     }
@@ -266,6 +297,11 @@ final class FeedState {
 
         l.lastEventAt = now;
         scrollSeen = true;
+
+        if (l.free) {
+            l.countedTo = l.position;
+            return 0;
+        }
 
         if (l.arriving) {
             if (l.arrivedAt == 0L) l.arrivedAt = now;

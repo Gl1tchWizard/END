@@ -390,12 +390,15 @@ public class EndAccessibilityService extends AccessibilityService {
             FeedState.ListTrack list = state.useList(id, cls, source.getViewIdResourceName(), scrollable,
                     bounds.left, bounds.top, bounds.right, bounds.bottom, paneChanged);
 
+            boolean wayOut = switched && state.claimExit(now);
             if (switched) {
                 log("FEED LIST " + list.viewId + " " + bounds.toShortString() + " class=" + cls
-                        + (scrollable ? "" : " (pager, no scroll actions)"));
+                        + (scrollable ? "" : " (pager, no scroll actions)")
+                        + (wayOut ? ", the way out: no end here" : ""));
             }
             if ((switched || resized) && curtain != null && state.key.equals(wallKey)) {
                 relayoutCurtain(state, false);
+                updateCurtain(state);
             }
             return true;
         } catch (Exception e) {
@@ -1110,6 +1113,9 @@ public class EndAccessibilityService extends AccessibilityService {
      */
     private View markerGuard;
     private WindowManager.LayoutParams guardParams;
+
+    /** The way out drawn on the marker, or null when this feed has none. */
+    private View exitPill;
     private int guardTop = Integer.MIN_VALUE;
     private int guardHeight;
 
@@ -1141,20 +1147,45 @@ public class EndAccessibilityService extends AccessibilityService {
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(2)));
 
         LinearLayout footer = new LinearLayout(this);
-        footer.setOrientation(LinearLayout.VERTICAL);
-        footer.setGravity(Gravity.CENTER_VERTICAL);
+        footer.setOrientation(LinearLayout.HORIZONTAL);
         footer.setGravity(Gravity.TOP);
-        footer.setPadding(dp(20), dp(11), dp(20), dp(13) + handleInset());
+        footer.setPadding(dp(20), dp(11), dp(14), dp(13) + handleInset());
         footer.setBackgroundColor(Color.rgb(5, 5, 5));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
 
         wallHeadline = label(headlineFor(state.key), ACID, 11, Typeface.BOLD);
         wallHeadline.setLetterSpacing(.18f);
-        footer.addView(wallHeadline);
+        copy.addView(wallHeadline);
 
         wallCountdown = label("--:--", MUTED, 12, Typeface.NORMAL);
         LinearLayout.LayoutParams countdownLp = wrap();
         countdownLp.topMargin = dp(3);
-        footer.addView(wallCountdown, countdownLp);
+        copy.addView(wallCountdown, countdownLp);
+
+        footer.addView(copy, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        // The way out: one tap to the part of the same app that no algorithm
+        // sorts. The user's own tap, and an ordinary link; END presses nothing
+        // inside the app.
+        exitPill = null;
+        Feeds.Exit exit = state.key.indexOf('#') < 0 ? Feeds.exitFor(state.key) : null;
+        if (exit != null) {
+            TextView pill = label(exit.label + "  \u203a", ACID, 11, Typeface.BOLD);
+            pill.setLetterSpacing(.12f);
+            pill.setPadding(dp(12), dp(8), dp(12), dp(8));
+            android.graphics.drawable.GradientDrawable outline = new android.graphics.drawable.GradientDrawable();
+            outline.setColor(Color.TRANSPARENT);
+            outline.setStroke(dp(1), ACID);
+            outline.setCornerRadius(dp(18));
+            pill.setBackground(outline);
+            LinearLayout.LayoutParams pillLp = wrap();
+            pillLp.topMargin = dp(1);
+            footer.addView(pill, pillLp);
+            exitPill = pill;
+        }
 
         sheet.addView(footer, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, markerHeight()));
@@ -1224,6 +1255,8 @@ public class EndAccessibilityService extends AccessibilityService {
         float lead = list != null && list.lastMoveForward && over > 0f ? dp(LEAD_DP) : 0f;
         float rest = restLine(listArea(state)) - curtainParams.y;
         float translation = Math.max(0f, Math.min(curtainHeight, rest - over - lead));
+        // The way out has no end, so nothing of the end shows on it.
+        if (list != null && list.free) translation = curtainHeight;
         curtainSheet.setTranslationY(translation);
         placeGuard(Math.round(translation));
     }
@@ -1317,7 +1350,26 @@ public class EndAccessibilityService extends AccessibilityService {
         if (markerGuard != null || windowManager == null) return;
 
         View view = new View(this);
-        view.setOnTouchListener((v, event) -> true);
+        view.setOnTouchListener(new View.OnTouchListener() {
+            private float downX;
+            private float downY;
+            private long downAt;
+
+            @Override public boolean onTouch(View v, MotionEvent event) {
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN) {
+                    downX = event.getRawX();
+                    downY = event.getRawY();
+                    downAt = event.getEventTime();
+                } else if (action == MotionEvent.ACTION_UP) {
+                    boolean tap = event.getEventTime() - downAt < 500L
+                            && Math.abs(event.getRawX() - downX) < dp(12)
+                            && Math.abs(event.getRawY() - downY) < dp(12);
+                    if (tap && onExitPill(event.getRawX(), event.getRawY())) openExit();
+                }
+                return true;
+            }
+        });
 
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT, 1,
@@ -1338,6 +1390,39 @@ public class EndAccessibilityService extends AccessibilityService {
             guardTop = Integer.MIN_VALUE;
         } catch (Exception e) {
             log("GUARD failed", e);
+        }
+    }
+
+    private boolean onExitPill(float x, float y) {
+        if (exitPill == null || !exitPill.isShown()) return false;
+        int[] at = new int[2];
+        exitPill.getLocationOnScreen(at);
+        int margin = dp(12);
+        return x >= at[0] - margin && x <= at[0] + exitPill.getWidth() + margin
+                && y >= at[1] - margin && y <= at[1] + exitPill.getHeight() + margin;
+    }
+
+    /**
+     * Open the way out: an ordinary link, handed to the app the feed is in.
+     * The list that comes on screen next is that way out and gets no end.
+     */
+    private void openExit() {
+        FeedState state = wallKey == null ? null : feeds.get(wallKey);
+        if (state == null) return;
+        String pkg = Feeds.packageOfKey(state.key);
+        Feeds.Exit exit = Feeds.exitFor(pkg);
+        if (exit == null) return;
+
+        try {
+            android.content.Intent intent = new android.content.Intent(
+                    android.content.Intent.ACTION_VIEW, android.net.Uri.parse(exit.url));
+            intent.setPackage(pkg);
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+            state.openExit(System.currentTimeMillis() + 30_000L);
+            log("EXIT to " + exit.label + " key=" + state.key);
+        } catch (Exception e) {
+            log("EXIT failed key=" + state.key, e);
         }
     }
 
@@ -1840,6 +1925,7 @@ public class EndAccessibilityService extends AccessibilityService {
         }
         markerGuard = null;
         guardParams = null;
+        exitPill = null;
         guardTop = Integer.MIN_VALUE;
         curtain = null;
         curtainParams = null;

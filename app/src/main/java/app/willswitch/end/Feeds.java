@@ -80,6 +80,49 @@ public final class Feeds {
         URL_BAR_IDS = Collections.unmodifiableMap(ids);
     }
 
+    /**
+     * The way out of an app's feed: the part of the same app that no algorithm
+     * sorts, as a link the app itself opens. Only links that were tried on a
+     * device are listed; a guess that lands on the wrong page is worse than no
+     * link. Sites in a browser have none: telling a subscriptions page from the
+     * home page would mean reading the path of the address, and END reads only
+     * the host.
+     */
+    public static final class Exit {
+        public final String label;
+        public final String url;
+
+        Exit(String label, String url) {
+            this.label = label;
+            this.url = url;
+        }
+    }
+
+    private static final Map<String, Exit> EXITS;
+    private static final Map<String, String> HISTORY_PAGES;
+
+    static {
+        Map<String, Exit> exits = new HashMap<>();
+        // Tried on YouTube 21.37: opens the Subscriptions page inside the app.
+        exits.put("com.google.android.youtube",
+                new Exit("SUBSCRIPTIONS", "https://www.youtube.com/feed/subscriptions"));
+        EXITS = Collections.unmodifiableMap(exits);
+
+        // Where the platform lets you pause or clear the history it recommends
+        // from. END only takes you there.
+        Map<String, String> history = new HashMap<>();
+        history.put("com.google.android.youtube", "https://myactivity.google.com/product/youtube");
+        HISTORY_PAGES = Collections.unmodifiableMap(history);
+    }
+
+    public static Exit exitFor(String pkg) {
+        return pkg == null ? null : EXITS.get(pkg);
+    }
+
+    public static String historyPage(String pkg) {
+        return pkg == null ? null : HISTORY_PAGES.get(pkg);
+    }
+
     public static boolean isBrowser(String pkg) {
         return pkg != null && URL_BAR_IDS.containsKey(pkg);
     }

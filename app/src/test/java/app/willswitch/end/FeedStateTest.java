@@ -52,6 +52,33 @@ public class FeedStateTest {
     }
 
     @Test
+    public void theWayOutHasNoEndAndTheFeedBehindItStillHas() {
+        FeedState s = youtube();
+        home(s, false);
+        settle(s);
+        s.lockedUntil = Long.MAX_VALUE;
+        s.pinEndHere();
+
+        s.openExit(clock + 30_000L);
+        assertFalse("the list being left is not the way out", s.claimExit(clock));
+
+        s.useList(44, RECYCLER, "results", true, 0, 371, 1080, 2340, true);
+        assertTrue(s.claimExit(clock));
+        clock += 400L;
+        recycler(s, 900, true, 3f);
+        recycler(s, 900, true, 3f);
+        assertEquals(0f, s.overshoot(), 0.01f);
+
+        home(s, true);
+        assertFalse("the way out was used; nothing else gets it", s.claimExit(clock));
+        clock += 400L;
+        recycler(s, 1, true, 3f);
+        clock += 400L;
+        recycler(s, 500, true, 3f);
+        assertEquals(500f, s.overshoot(), 2f);
+    }
+
+    @Test
     public void theFirstSwipeOnAListCountsWhenNoPaneChanged() {
         FeedState s = youtube();
         s.useList(SHORTS, RECYCLER, "reel_recycler", false, 0, 101, 1080, 2163, false);
