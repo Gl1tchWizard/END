@@ -421,7 +421,7 @@ public class EndAccessibilityService extends AccessibilityService {
 
     // ------------------------------------------------------------ past the end
 
-    private static final int BRAKE_DP = 10;
+    private static final int BRAKE_DP = 3;
     private static final int REST_DP = 8;
     private static final long SPRING_HOLD_MS = 160L;
     private static final long SETTLE_MS = 200L;
