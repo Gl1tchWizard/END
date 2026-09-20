@@ -136,7 +136,7 @@ public class MainActivity extends Activity {
 
         root.addView(spacer(30));
         root.addView(sectionTitle("MAKE THESE FINITE"));
-        root.addView(body("END counts how much feed you scroll in the apps you select. When the limit is reached, the scroll ends: a footer marks the end of the feed and nothing further loads until the countdown runs out. The feed stays visible, taps still work, and a swipe down steps back through what you already saw."));
+        root.addView(body("END counts how much feed you scroll in the apps you select. When the limit is reached, the scroll ends: a marker at the bottom of the screen is the end of the feed until the countdown runs out. Push past it and the feed comes straight back. Everything you already saw is still there, scrolling back is the app's own, and taps still work."));
         root.addView(spacer(10));
         for (AppSpec app : APPS) root.addView(appRow(app));
 
@@ -149,6 +149,13 @@ public class MainActivity extends Activity {
         if (EndPrefs.browserSitesEnabled(this)) {
             for (SiteSpec site : SITES) root.addView(siteRow(site));
         }
+
+        root.addView(spacer(30));
+        root.addView(sectionTitle("WHAT THE FEED LEARNS FROM YOU"));
+        root.addView(body("A feed has no setting for being less compelling. It learns from what you do in it: how long you stay, whether you scroll on. \"They kept scrolling\" is the strongest signal it has, and with END it no longer gets that from you.\n\nTwo more things are yours to do. Where an app has a part that no algorithm sorts, the end marker offers one tap to it: in YouTube, Subscriptions. It is an ordinary link and it has no end. And you can pause or clear the history a platform recommends from. END only takes you to the platform's own page for it."));
+        root.addView(spacer(6));
+        root.addView(linkRow("Pause or clear your YouTube history",
+                Feeds.historyPage("com.google.android.youtube")));
 
         root.addView(spacer(30));
         root.addView(sectionTitle("PRIVACY FIRST"));
@@ -426,6 +433,24 @@ public class MainActivity extends Activity {
                 (button, checked) -> EndPrefs.setHostEnabled(this, site.host, checked));
         row.addView(toggle);
         return row;
+    }
+
+    /** A line of acid text that opens a page in the browser. */
+    private TextView linkRow(String text, final String url) {
+        TextView v = new TextView(this);
+        v.setText(text + "  \u203a");
+        v.setTextColor(ACID);
+        v.setTextSize(12);
+        v.setTypeface(Typeface.DEFAULT_BOLD);
+        v.setPadding(0, dp(12), 0, dp(12));
+        v.setOnClickListener(view -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+            } catch (Exception e) {
+                // No browser to open it with.
+            }
+        });
+        return v;
     }
 
     private TextView sectionTitle(String text) {
